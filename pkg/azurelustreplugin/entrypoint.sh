@@ -108,7 +108,13 @@ if [[ "${installClientPackages}" == "yes" ]]; then
     echo "deb [arch=amd64] https://packages.microsoft.com/repos/amlfs-${osReleaseCodeName}/ ${osReleaseCodeName} main" | tee /etc/apt/sources.list.d/amlfs.list
     apt-get update
   fi
-  
+  apt --only-upgrade -y install gpg curl ca-certificates iproute2 kmod libc-dev-bin libc6 libc6-dev  \
+    libcrypt-dev libgdbm-compat4 libgdbm6 libkmod2     \
+    libmysqlclient21 libnetsnmptrapd40 libnl-3-200 libnl-genl-3-200 libnsl-dev libpci-dev libpci3    \
+    libperl5.34 libsensors-config libsensors-dev libsensors5 libsnmp-base libsnmp-dev libsnmp40      \
+    libssl-dev libtirpc-dev libudev-dev libwrap0 libwrap0-dev libyaml-0-2 linux-base linux-base-sgx  \
+    linux-libc-dev mysql-common pci.ids perl perl-modules-5.34 rpcsvc-proto zlib1g-dev
+
   echo "$(date -u) Installing Lustre client modules: ${pkgName}=${kernelVersion}"
 
   # grub issue
