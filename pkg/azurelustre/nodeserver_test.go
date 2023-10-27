@@ -36,6 +36,7 @@ import (
 )
 
 const (
+	sourceTest = "source_test"
 	targetTest = "target_test"
 	subDir     = "testSubDir"
 )
@@ -127,7 +128,7 @@ func TestEnsureMountPoint(t *testing.T) {
 		t.Run(test.desc, func(t *testing.T) {
 			_, err := d.ensureMountPoint(test.target)
 			if !reflect.DeepEqual(err, test.expectedErr) {
-				t.Errorf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
+				t.Fatalf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
 			}
 		})
 
@@ -139,13 +140,6 @@ func TestEnsureMountPoint(t *testing.T) {
 }
 
 func TestNodePublishVolume(t *testing.T) {
-	workingDirectory, err := os.Getwd()
-	if err != nil {
-		t.Errorf("failed to get current working directory")
-	}
-
-	workingMountDir := filepath.Join(workingDirectory, "workingMountDir")
-
 	volumeCap := csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER}
 	alreadyExistTarget := "./false_is_likely_exist_target"
 	metadataVolumeID := "vol_1#lustrefs#1.1.1.1#testNestedSubDir/${pod.metadata.name}/${pod.metadata.namespace}/${pod.metadata.uid}/${serviceAccount.metadata.name}/${pvc.metadata.name}/${pvc.metadata.namespace}/${pv.metadata.name}/testNestedSubDir"
@@ -157,71 +151,41 @@ func TestNodePublishVolume(t *testing.T) {
 		setup                func(*Driver)
 		req                  csi.NodePublishVolumeRequest
 		expectedErr          error
-		expectedMountpoints  []mount.MountPoint
+		expectedMountpoint   *mount.MountPoint
 		expectedMountActions []mount.FakeAction
 		cleanup              func(*Driver)
 	}{
 		{
-			desc:                 "Volume capabilities missing",
-			req:                  csi.NodePublishVolumeRequest{},
-			expectedErr:          status.Error(codes.InvalidArgument, "Volume capability missing in request"),
-			expectedMountpoints:  nil,
-			expectedMountActions: []mount.FakeAction{},
-		},
-		{
 			desc:                 "Volume ID missing",
 			req:                  csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap}},
 			expectedErr:          status.Error(codes.InvalidArgument, "Volume ID missing in request"),
-			expectedMountpoints:  nil,
+			expectedMountpoint:   nil,
 			expectedMountActions: []mount.FakeAction{},
 		},
 		{
 			desc: "Volume context missing",
 			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
-				VolumeId:         "vol_1##",
-				TargetPath:       targetTest,
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1##",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
 			},
 			expectedErr:          status.Error(codes.InvalidArgument, "Volume context must be provided"),
-			expectedMountpoints:  nil,
-			expectedMountActions: []mount.FakeAction{},
-		},
-		{
-			desc: "Target path missing",
-			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
-				VolumeId:         "vol_1#lustrefs#",
-				VolumeContext:    map[string]string{"fs-name": "lustrefs"},
-			},
-			expectedErr:          status.Error(codes.InvalidArgument, "Target path not provided"),
-			expectedMountpoints:  nil,
+			expectedMountpoint:   nil,
 			expectedMountActions: []mount.FakeAction{},
 		},
 		{
 			desc: "MGS IP address missing",
 			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
-				VolumeId:         "vol_1#lustrefs#",
-				TargetPath:       targetTest,
-				VolumeContext:    map[string]string{"fs-name": "lustrefs"},
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1#lustrefs#",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"fs-name": "lustrefs"},
 			},
 			expectedErr:          status.Error(codes.InvalidArgument, "Context mgs-ip-address must be provided"),
-			expectedMountpoints:  nil,
+			expectedMountpoint:   nil,
 			expectedMountActions: []mount.FakeAction{},
-		},
-		{
-			desc: "Valid request without lustre fs name",
-			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
-					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
-				}},
-				VolumeId:      "vol_1##1.1.1.1",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1"},
-			},
-			expectedErr:          nil,
-			expectedMountpoints:  []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs", Path: "target_test", Type: "lustre", Opts: []string{"noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"}},
 		},
 		{
 			desc: "Valid request with old ID",
@@ -229,51 +193,55 @@ func TestNodePublishVolume(t *testing.T) {
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+				VolumeId:          "vol_1#lustrefs#1.1.1.1",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
 			},
 			expectedErr:          nil,
-			expectedMountpoints:  []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs", Path: "target_test", Type: "lustre", Opts: []string{"noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"}},
+			expectedMountpoint:   &mount.MountPoint{Device: sourceTest, Path: targetTest, Type: "", Opts: []string{"bind"}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: sourceTest, FSType: ""}},
 		},
 		{
 			desc: "Empty sub-dir",
 			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
-				VolumeId:         "vol_1#lustrefs#1.1.1.1#",
-				TargetPath:       targetTest,
-				VolumeContext:    map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": ""},
-				Readonly:         false,
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": ""},
+				Readonly:          false,
 			},
 			expectedErr:          status.Error(codes.InvalidArgument, "Context sub-dir must not be empty or root if provided"),
-			expectedMountpoints:  nil,
+			expectedMountpoint:   nil,
 			expectedMountActions: []mount.FakeAction{},
 		},
 		{
 			desc: "Invalid root sub-dir",
 			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
-				VolumeId:         "vol_1#lustrefs#1.1.1.1#/",
-				TargetPath:       targetTest,
-				VolumeContext:    map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": "/"},
-				Readonly:         false,
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#/",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": "/"},
+				Readonly:          false,
 			},
 			expectedErr:          status.Error(codes.InvalidArgument, "Context sub-dir must not be empty or root if provided"),
-			expectedMountpoints:  nil,
+			expectedMountpoint:   nil,
 			expectedMountActions: []mount.FakeAction{},
 		},
 		{
 			desc: "Invalid sub-dir to parent",
 			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
-				VolumeId:         "vol_1#lustrefs#1.1.1.1#../../parentAttemptSubDir",
-				TargetPath:       targetTest,
-				VolumeContext:    map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": "../../parentAttemptSubDir"},
-				Readonly:         false,
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#../../parentAttemptSubDir",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": "../../parentAttemptSubDir"},
+				Readonly:          false,
 			},
 			expectedErr:          status.Error(codes.InvalidArgument, "Context sub-dir must be strict subpath"),
-			expectedMountpoints:  nil,
+			expectedMountpoint:   nil,
 			expectedMountActions: []mount.FakeAction{},
 		},
 		{
@@ -282,29 +250,71 @@ func TestNodePublishVolume(t *testing.T) {
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1#testSubDir",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
-				Readonly:      true,
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+				Readonly:          true,
 			},
 			expectedErr:          nil,
-			expectedMountpoints:  []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs/testSubDir", Path: "target_test", Type: "lustre", Opts: []string{"ro", "noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs/testSubDir", FSType: "lustre"}},
+			expectedMountpoint:   &mount.MountPoint{Device: sourceTest, Path: targetTest, Type: "", Opts: []string{"bind", "ro"}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: sourceTest, FSType: ""}},
 		},
 		{
-			desc: "Valid mount options, no sub-dir",
+			desc: "Stage target path missing",
+			req: csi.NodePublishVolumeRequest{
+				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:         "vol_1",
+				TargetPath:       targetTest,
+				VolumeContext:    map[string]string{"mgs-ip-address": "1.1.1.1"},
+			},
+			expectedErr:          status.Error(codes.InvalidArgument, "Staging target not provided"),
+			expectedMountpoint:   nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc: "Target path missing",
+			req: csi.NodePublishVolumeRequest{
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				StagingTargetPath: sourceTest,
+				VolumeId:          "vol_1#lustrefs#",
+				VolumeContext:     map[string]string{"fs-name": "lustrefs"},
+			},
+			expectedErr:          status.Error(codes.InvalidArgument, "Target path not provided"),
+			expectedMountpoint:   nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc: "Valid mount options",
 			req: csi.NodePublishVolumeRequest{
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1#",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
-				Readonly:      false,
+				VolumeId:          "vol_1",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+				Readonly:          false,
 			},
 			expectedErr:          nil,
-			expectedMountpoints:  []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs", Path: "target_test", Type: "lustre", Opts: []string{"noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"}},
+			expectedMountpoint:   &mount.MountPoint{Device: sourceTest, Path: targetTest, Type: "", Opts: []string{"bind"}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: sourceTest, FSType: ""}},
+		},
+		{
+			desc: "Valid mount options, earlier volume ID format",
+			req: csi.NodePublishVolumeRequest{
+				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
+					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
+				}},
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+				Readonly:          false,
+			},
+			expectedErr:          nil,
+			expectedMountpoint:   &mount.MountPoint{Device: sourceTest, Path: targetTest, Type: "", Opts: []string{"bind"}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: sourceTest, FSType: ""}},
 		},
 		{
 			desc: "Valid mount options with dynamic provisioning",
@@ -312,14 +322,15 @@ func TestNodePublishVolume(t *testing.T) {
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-rg",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "amlfilesystem-name": "test-amlfilesystem-name", "resource-group-name": "test-amlfilesystem-rg"},
-				Readonly:      false,
+				VolumeId:          "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-rg",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "amlfilesystem-name": "test-amlfilesystem-name", "resource-group-name": "test-amlfilesystem-rg"},
+				Readonly:          false,
 			},
 			expectedErr:          nil,
-			expectedMountpoints:  []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs", Path: "target_test", Type: "lustre", Opts: []string{"noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"}},
+			expectedMountpoint:   &mount.MountPoint{Device: sourceTest, Path: targetTest, Type: "", Opts: []string{"bind"}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: sourceTest, FSType: ""}},
 		},
 		{
 			desc: "Valid mount options with sub-dir",
@@ -327,37 +338,31 @@ func TestNodePublishVolume(t *testing.T) {
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1#testSubDir",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
-				Readonly:      false,
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#testSubDir",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
+				Readonly:          false,
 			},
-			expectedErr:         nil,
-			expectedMountpoints: []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs/testSubDir", Path: "target_test", Type: "lustre", Opts: []string{"noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{
-				{Action: "mount", Target: workingMountDir + "/target_test", Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"},
-				{Action: "unmount", Target: workingMountDir + "/target_test", Source: "", FSType: ""},
-				{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs/testSubDir", FSType: "lustre"},
-			},
+			expectedErr:          nil,
+			expectedMountpoint:   &mount.MountPoint{Device: "source_test/testSubDir", Path: targetTest, Type: "", Opts: []string{"bind"}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: "source_test/testSubDir", FSType: ""}},
 		},
 		{
-			desc: "Unexpected volume ID doesn't skip sub-dir creation",
+			desc: "Sub-dir in context but not volume ID still creates sub-dir",
 			req: csi.NodePublishVolumeRequest{
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 				}},
-				VolumeId:      "vol_1",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
-				Readonly:      false,
+				VolumeId:          "vol_1",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
+				Readonly:          false,
 			},
-			expectedErr:         nil,
-			expectedMountpoints: []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs/testSubDir", Path: "target_test", Type: "lustre", Opts: []string{"noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{
-				{Action: "mount", Target: workingMountDir + "/target_test", Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"},
-				{Action: "unmount", Target: workingMountDir + "/target_test", Source: "", FSType: ""},
-				{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs/testSubDir", FSType: "lustre"},
-			},
+			expectedErr:          nil,
+			expectedMountpoint:   &mount.MountPoint{Device: "source_test/testSubDir", Path: targetTest, Type: "", Opts: []string{"bind"}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: "source_test/testSubDir", FSType: ""}},
 		},
 		{
 			desc: "Valid mount options with slashes in paths",
@@ -365,18 +370,15 @@ func TestNodePublishVolume(t *testing.T) {
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1#testSubDir",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs/", "sub-dir": "/testSubDir/"},
-				Readonly:      false,
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#testSubDir",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs/", "sub-dir": "/testSubDir/"},
+				Readonly:          false,
 			},
-			expectedErr:         nil,
-			expectedMountpoints: []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs/testSubDir", Path: "target_test", Type: "lustre", Opts: []string{"noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{
-				{Action: "mount", Target: workingMountDir + "/target_test", Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"},
-				{Action: "unmount", Target: workingMountDir + "/target_test", Source: "", FSType: ""},
-				{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs/testSubDir", FSType: "lustre"},
-			},
+			expectedErr:          nil,
+			expectedMountpoint:   &mount.MountPoint{Device: "source_test/testSubDir", Path: targetTest, Type: "", Opts: []string{"bind"}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: "source_test/testSubDir", FSType: ""}},
 		},
 		{
 			desc: "Valid mount options with metadata",
@@ -384,8 +386,9 @@ func TestNodePublishVolume(t *testing.T) {
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 				}},
-				VolumeId:   metadataVolumeID,
-				TargetPath: targetTest,
+				VolumeId:          metadataVolumeID,
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
 				VolumeContext: map[string]string{
 					"mgs-ip-address":                         "1.1.1.1",
 					"fs-name":                                "lustrefs",
@@ -401,24 +404,18 @@ func TestNodePublishVolume(t *testing.T) {
 				Readonly: false,
 			},
 			expectedErr: nil,
-			expectedMountpoints: []mount.MountPoint{
-				{
-					Device: "1.1.1.1@tcp:/lustrefs/testNestedSubDir/testPodName/testPodNamespace/testPodUid/testServiceAccountName/testPvcName/testPvcNamespace/testPvName/testNestedSubDir",
-					Path:   "target_test",
-					Type:   "lustre",
-					Opts:   []string{"noatime", "flock"},
-				},
+			expectedMountpoint: &mount.MountPoint{
+				Device: "source_test/testNestedSubDir/testPodName/testPodNamespace/testPodUid/testServiceAccountName/testPvcName/testPvcNamespace/testPvName/testNestedSubDir",
+				Path:   targetTest,
+				Type:   "",
+				Opts:   []string{"bind"},
 			},
-			expectedMountActions: []mount.FakeAction{
-				{Action: "mount", Target: filepath.Join(workingMountDir, targetTest), Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"},
-				{Action: "unmount", Target: filepath.Join(workingMountDir, targetTest), Source: "", FSType: ""},
-				{
-					Action: "mount",
-					Target: "target_test",
-					Source: "1.1.1.1@tcp:/lustrefs/testNestedSubDir/testPodName/testPodNamespace/testPodUid/testServiceAccountName/testPvcName/testPvcNamespace/testPvName/testNestedSubDir",
-					FSType: "lustre",
-				},
-			},
+			expectedMountActions: []mount.FakeAction{{
+				Action: "mount",
+				Target: targetTest,
+				Source: "source_test/testNestedSubDir/testPodName/testPodNamespace/testPodUid/testServiceAccountName/testPvcName/testPvcNamespace/testPvName/testNestedSubDir",
+				FSType: "",
+			}},
 		},
 		{
 			desc: "Valid mount options with duplicated readonly",
@@ -426,80 +423,57 @@ func TestNodePublishVolume(t *testing.T) {
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock", "ro"}},
 				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1#testSubDir",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
-				Readonly:      true,
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#",
+				TargetPath:        targetTest,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+				Readonly:          true,
 			},
 			expectedErr:          nil,
-			expectedMountpoints:  []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs/testSubDir", Path: "target_test", Type: "lustre", Opts: []string{"ro", "noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs/testSubDir", FSType: "lustre"}},
+			expectedMountpoint:   &mount.MountPoint{Device: sourceTest, Path: targetTest, Type: "", Opts: []string{"bind", "ro"}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: sourceTest, FSType: ""}},
 		},
 		{
 			desc: "Error creating directory",
 			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
-				VolumeId:         "vol_1#lustrefs#1.1.1.1#",
-				TargetPath:       "./azurelustre.go",
-				VolumeContext:    map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
-				Readonly:         true,
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#",
+				TargetPath:        "./azurelustre.go",
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+				Readonly:          true,
 			},
 			expectedErr:          createDirError,
-			expectedMountpoints:  nil,
+			expectedMountpoint:   nil,
 			expectedMountActions: []mount.FakeAction{},
-		},
-		{
-			desc: "Internal mount path already mounted",
-			setup: func(d *Driver) {
-				d.workingMountDir = "./false_is_likely"
-				err = makeDir(filepath.Join("./false_is_likely", targetTest))
-				require.NoError(t, err)
-				err = d.mounter.Mount("1.1.1.1@tcp:/lustrefs/existing", filepath.Join("./false_is_likely", targetTest), "lustre", []string{"noatime", "flock"})
-				require.NoError(t, err)
-			},
-			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
-					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
-				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1#testSubDir",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
-				Readonly:      false,
-			},
-			expectedErr:         nil,
-			expectedMountpoints: []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs/testSubDir", Path: "target_test", Type: "lustre", Opts: []string{"noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{
-				{Action: "unmount", Target: filepath.Join("false_is_likely/", targetTest), Source: "", FSType: ""},
-				{Action: "mount", Target: filepath.Join("false_is_likely/", targetTest), Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"},
-				{Action: "unmount", Target: filepath.Join("false_is_likely/", targetTest), Source: "", FSType: ""},
-				{Action: "mount", Target: targetTest, Source: "1.1.1.1@tcp:/lustrefs/testSubDir", FSType: "lustre"},
-			},
 		},
 		{
 			desc: "Success already mounted",
 			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
-				VolumeId:         "vol_1#lustrefs#1.1.1.1#testSubDir",
-				TargetPath:       alreadyExistTarget,
-				VolumeContext:    map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
-				Readonly:         true,
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#",
+				TargetPath:        alreadyExistTarget,
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+				Readonly:          true,
 			},
 			expectedErr:          nil,
-			expectedMountpoints:  nil,
+			expectedMountpoint:   nil,
 			expectedMountActions: []mount.FakeAction{},
 		},
 		{
 			desc: "Error could not mount",
 			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
-				VolumeId:         "vol_1#lustrefs#1.1.1.1#",
-				TargetPath:       "error_mount_sens_mountflags",
-				VolumeContext:    map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
-				Readonly:         true,
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#",
+				TargetPath:        "error_mount_sens_mountflags",
+				StagingTargetPath: sourceTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+				Readonly:          true,
 			},
 			expectedErr: status.Error(codes.Internal,
-				"Could not mount \"1.1.1.1@tcp:/lustrefs\" at \"error_mount_sens_mountflags\": fake MountSensitiveWithoutSystemdWithMountFlags: target error"),
-			expectedMountpoints:  nil,
+				"Could not mount \"source_test\" at \"error_mount_sens_mountflags\": fake MountSensitiveWithoutSystemdWithMountFlags: target error"),
+			expectedMountpoint:   nil,
 			expectedMountActions: []mount.FakeAction{},
 		},
 		{
@@ -515,7 +489,7 @@ func TestNodePublishVolume(t *testing.T) {
 				Readonly:         false,
 			},
 			expectedErr:          status.Error(codes.Aborted, fmt.Sprintf(volumeOperationAlreadyExistsFmt, "vol_1#lustrefs#1.1.1.1#testSubDir")),
-			expectedMountpoints:  nil,
+			expectedMountpoint:   nil,
 			expectedMountActions: []mount.FakeAction{},
 			cleanup: func(d *Driver) {
 				d.volumeLocks.Release(lockKey)
@@ -527,6 +501,7 @@ func TestNodePublishVolume(t *testing.T) {
 
 	for i := range tests {
 		test := &tests[i]
+		require.NotNil(t, test.expectedMountActions, "Test %q expectedMountActions must be not nil", test.desc)
 
 		fakeMounter := &fakeMounter{}
 		fakeExec := &testingexec.FakeExec{ExactOrder: true}
@@ -537,7 +512,6 @@ func TestNodePublishVolume(t *testing.T) {
 		forceMounter, ok := d.mounter.Interface.(mount.MounterForceUnmounter)
 		require.True(t, ok, "Mounter should implement MounterForceUnmounter")
 		d.forceMounter = &forceMounter
-		d.workingMountDir = workingMountDir
 		err := makeDir(targetTest)
 		require.NoError(t, err)
 		err = makeDir(alreadyExistTarget)
@@ -552,27 +526,33 @@ func TestNodePublishVolume(t *testing.T) {
 		t.Run(test.desc, func(t *testing.T) {
 			_, err = d.NodePublishVolume(context.Background(), &test.req)
 			if !reflect.DeepEqual(err, test.expectedErr) {
-				t.Errorf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
+				t.Fatalf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
 			}
 
 			mountPoints, err := d.mounter.List()
 			require.NoError(t, err)
-			assert.Equal(t, test.expectedMountpoints, mountPoints, "Desc: %s - Incorrect mount points: %v - Expected: %v", test.desc, mountPoints, test.expectedMountpoints)
+			if test.expectedMountpoint == nil {
+				require.Empty(t, mountPoints, "Desc: %s - Expected no mount points, got: %v", test.desc, mountPoints)
+			} else {
+				require.Len(t, mountPoints, 1, "Desc: %s - Expected exactly one mount point, got: %v", test.desc, mountPoints)
+				mountPoint := mountPoints[0]
+				assert.Equal(t, *test.expectedMountpoint, mountPoint, "Desc: %s - Incorrect mount points: %v - Expected: %v", test.desc, mountPoint, test.expectedMountpoint)
+			}
+
 			mountActions := fakeMounter.GetLog()
 			assert.Equal(t, test.expectedMountActions, mountActions, "Desc: %s - Incorrect mount actions: %v - Expected: %v", test.desc, mountActions, test.expectedMountActions)
 
 			// Check that sub-dir has been created in the mount. This works because
-			// the contents in workingMountDir still exist after the test. The reason is
-			// os.Remove on workingMountDir fails because it is non-empty after unmount
+			// the contents in the global dir still exist after the test. The reason is
+			// os.Remove on the global dir fails because it is non-empty after unmount
 			// since it's not a real mounted Lustre
-			if subDirPath, ok := test.req.GetPublishContext()["sub-dir"]; ok {
+			if _, ok := test.req.GetVolumeContext()["sub-dir"]; ok {
 				if test.expectedErr == nil {
-					internalMountDir := filepath.Join(d.workingMountDir, test.req.GetVolumeId())
-					subDirPath := filepath.Join(internalMountDir, subDirPath)
+					subDirPath := filepath.Clean(test.expectedMountpoint.Device)
 					assert.DirExists(t, subDirPath, "Expected sub-dir %q to be created", subDirPath)
-					err = d.mounter.Unmount(internalMountDir)
+					err = d.mounter.Unmount(subDirPath)
 					require.NoError(t, err)
-					err = os.RemoveAll(internalMountDir)
+					err = os.RemoveAll(subDirPath)
 					require.NoError(t, err)
 				}
 			}
@@ -582,26 +562,381 @@ func TestNodePublishVolume(t *testing.T) {
 			test.cleanup(d)
 		}
 
-		err = d.mounter.Unmount(d.workingMountDir)
-		require.NoError(t, err)
-		err = os.RemoveAll(d.workingMountDir)
-		require.NoError(t, err)
 		err = d.mounter.Unmount(targetTest)
 		require.NoError(t, err)
 		err = os.RemoveAll(alreadyExistTarget)
 		require.NoError(t, err)
 		err = os.RemoveAll(targetTest)
 		require.NoError(t, err)
+		err = os.RemoveAll(sourceTest)
+		assert.NoError(t, err)
+	}
+}
+
+func TestNodeStageVolume(t *testing.T) {
+	volumeCap := csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER}
+	alreadyExistTarget := "./false_is_likely_exist_target"
+	createDirError := status.Errorf(codes.Internal,
+		"Could not mount staging target \"./azurelustre.go\": mkdir ./azurelustre.go: not a directory")
+	lockKey := fmt.Sprintf("%s-%s", "vol_1#lustrefs#1.1.1.1#testSubDir", targetTest)
+	tests := []struct {
+		desc                 string
+		setup                func(*Driver)
+		req                  csi.NodeStageVolumeRequest
+		expectedErr          error
+		expectedMountpoints  []mount.MountPoint
+		expectedMountActions []mount.FakeAction
+		cleanup              func(*Driver)
+	}{
+		{
+			desc: "Volume capabilities missing",
+			req: csi.NodeStageVolumeRequest{
+				VolumeId: "vol_1",
+			},
+			expectedErr:          status.Error(codes.InvalidArgument, "Volume capability missing in request"),
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc:                 "Volume ID missing",
+			req:                  csi.NodeStageVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap}},
+			expectedErr:          status.Error(codes.InvalidArgument, "Volume ID missing in request"),
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc: "Stage target path missing",
+			req: csi.NodeStageVolumeRequest{
+				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:         "vol_1",
+			},
+			expectedErr:          status.Error(codes.InvalidArgument, "Staging target path not provided"),
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc: "Volume context missing",
+			req: csi.NodeStageVolumeRequest{
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1",
+				StagingTargetPath: targetTest,
+			},
+			expectedErr:          status.Error(codes.InvalidArgument, "Volume context must be provided"),
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc: "MGS IP address missing",
+			req: csi.NodeStageVolumeRequest{
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1",
+				StagingTargetPath: targetTest,
+				VolumeContext:     map[string]string{"fs-name": "lustrefs"},
+			},
+			expectedErr:          status.Error(codes.InvalidArgument, "Context mgs-ip-address must be provided"),
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc: "Valid mount options",
+			req: csi.NodeStageVolumeRequest{
+				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
+					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
+				}},
+				VolumeId:          "vol_1",
+				StagingTargetPath: targetTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+			},
+			expectedErr:          nil,
+			expectedMountpoints:  []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs", Path: targetTest, Type: "lustre", Opts: []string{"noatime", "flock", "no_share_fsid"}}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"}},
+		},
+		{
+			desc: "Valid mount options with readonly",
+			req: csi.NodeStageVolumeRequest{
+				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
+					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock", "ro"}},
+				}},
+				VolumeId:          "vol_1",
+				StagingTargetPath: targetTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+			},
+			expectedErr:          nil,
+			expectedMountpoints:  []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs", Path: targetTest, Type: "lustre", Opts: []string{"noatime", "flock", "ro", "no_share_fsid"}}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: targetTest, Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"}},
+		},
+		{
+			desc: "Error creating directory",
+			req: csi.NodeStageVolumeRequest{
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1",
+				StagingTargetPath: "./azurelustre.go",
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+			},
+			expectedErr:          createDirError,
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc: "Success already mounted",
+			req: csi.NodeStageVolumeRequest{
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1",
+				StagingTargetPath: alreadyExistTarget,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+			},
+			expectedErr:          nil,
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc: "Error could not mount",
+			req: csi.NodeStageVolumeRequest{
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1",
+				StagingTargetPath: "error_mount_sens_mountflags",
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+			},
+			expectedErr: status.Error(codes.Internal,
+				"Could not mount \"1.1.1.1@tcp:/lustrefs\" at \"error_mount_sens_mountflags\": fake MountSensitiveWithoutSystemdWithMountFlags: target error"),
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc: "Error volume operation in progress",
+			setup: func(d *Driver) {
+				d.volumeLocks.TryAcquire(lockKey)
+			},
+			req: csi.NodeStageVolumeRequest{
+				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCap},
+				VolumeId:          "vol_1#lustrefs#1.1.1.1#testSubDir",
+				StagingTargetPath: targetTest,
+				VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
+			},
+			expectedErr:          status.Error(codes.Aborted, fmt.Sprintf(volumeOperationAlreadyExistsFmt, "vol_1#lustrefs#1.1.1.1#testSubDir")),
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+			cleanup: func(d *Driver) {
+				d.volumeLocks.Release(lockKey)
+			},
+		},
+	}
+
+	d := NewFakeDriver()
+
+	for i := range tests {
+		test := &tests[i]
+
+		require.NotNil(t, test.expectedMountActions, "test.expectedMountActions must be non-nil")
+
+		fakeMounter := &fakeMounter{}
+		fakeExec := &testingexec.FakeExec{ExactOrder: true}
+		d.mounter = &mount.SafeFormatAndMount{
+			Interface: fakeMounter,
+			Exec:      fakeExec,
+		}
+		forceMounter, ok := d.mounter.Interface.(mount.MounterForceUnmounter)
+		require.True(t, ok, "Mounter should implement MounterForceUnmounter")
+		d.forceMounter = &forceMounter
+		err := makeDir(targetTest)
+		require.NoError(t, err)
+		err = makeDir(alreadyExistTarget)
+		require.NoError(t, err)
+
+		if test.setup != nil {
+			test.setup(d)
+		}
+
+		fakeMounter.ResetLog()
+
+		t.Run(test.desc, func(t *testing.T) {
+			_, err = d.NodeStageVolume(context.Background(), &test.req)
+			if !reflect.DeepEqual(err, test.expectedErr) {
+				t.Fatalf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
+			}
+
+			mountPoints, err := d.mounter.List()
+			require.NoError(t, err)
+			assert.Equal(t, test.expectedMountpoints, mountPoints, "Desc: %s - Incorrect mount points: %v - Expected: %v", test.desc, mountPoints, test.expectedMountpoints)
+			mountActions := fakeMounter.GetLog()
+			assert.Equal(t, test.expectedMountActions, mountActions, "Desc: %s - Incorrect mount actions: %v - Expected: %v", test.desc, mountActions, test.expectedMountActions)
+		})
+
+		if test.cleanup != nil {
+			test.cleanup(d)
+		}
+
+		err = d.mounter.Unmount(targetTest)
+		require.NoError(t, err)
+		err = os.RemoveAll(alreadyExistTarget)
+		require.NoError(t, err)
+		err = os.RemoveAll(targetTest)
+		require.NoError(t, err)
+		err = os.RemoveAll(sourceTest)
+		assert.NoError(t, err)
+	}
+}
+
+func TestNodeUnstageVolume(t *testing.T) {
+	lockKey := fmt.Sprintf("%s-%s", "vol_1#lustrefs#1.1.1.1#testSubDir", targetTest)
+
+	tests := []struct {
+		desc                 string
+		setup                func(*Driver)
+		req                  csi.NodeUnstageVolumeRequest
+		expectedErr          error
+		expectExistingSubDir bool
+		expectedMountpoints  []mount.MountPoint
+		expectedMountActions []mount.FakeAction
+		cleanup              func(*Driver)
+	}{
+		{
+			desc:                 "Volume ID missing",
+			req:                  csi.NodeUnstageVolumeRequest{},
+			expectedErr:          status.Error(codes.InvalidArgument, "Volume ID missing in request"),
+			expectExistingSubDir: false,
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc:                 "Target missing",
+			req:                  csi.NodeUnstageVolumeRequest{VolumeId: "vol_1"},
+			expectedErr:          status.Error(codes.InvalidArgument, "Target path missing in request"),
+			expectExistingSubDir: false,
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc:                 "Valid request",
+			req:                  csi.NodeUnstageVolumeRequest{StagingTargetPath: targetTest, VolumeId: "vol_1"},
+			expectedErr:          nil,
+			expectExistingSubDir: false,
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc:                 "Unmount when not mounted succeeds",
+			req:                  csi.NodeUnstageVolumeRequest{StagingTargetPath: targetTest, VolumeId: "vol_1#lustrefs#1.1.1.1#testSubDir"},
+			expectedErr:          nil,
+			expectExistingSubDir: false,
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+		},
+		{
+			desc: "Valid request with old ID",
+			setup: func(d *Driver) {
+				volumeCap := csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER}
+				req := csi.NodeStageVolumeRequest{
+					VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
+						Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
+					}},
+					VolumeId:          "vol_1#lustrefs#1.1.1.1",
+					StagingTargetPath: targetTest,
+					VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+				}
+				_, err := d.NodeStageVolume(context.Background(), &req)
+				require.NoError(t, err)
+			},
+			req:                  csi.NodeUnstageVolumeRequest{StagingTargetPath: targetTest, VolumeId: "vol_1#lustrefs#1.1.1.1"},
+			expectedErr:          nil,
+			expectExistingSubDir: false,
+			expectedMountpoints:  []mount.MountPoint{},
+			expectedMountActions: []mount.FakeAction{
+				{Action: "unmount", Target: targetTest, Source: "", FSType: ""},
+			},
+		},
+		{
+			desc: "Error volume operation in progress",
+			setup: func(d *Driver) {
+				d.volumeLocks.TryAcquire(lockKey)
+			},
+			req:                  csi.NodeUnstageVolumeRequest{StagingTargetPath: targetTest, VolumeId: "vol_1#lustrefs#1.1.1.1#testSubDir"},
+			expectedErr:          status.Error(codes.Aborted, fmt.Sprintf(volumeOperationAlreadyExistsFmt, "vol_1#lustrefs#1.1.1.1#testSubDir")),
+			expectExistingSubDir: false,
+			expectedMountpoints:  nil,
+			expectedMountActions: []mount.FakeAction{},
+			cleanup: func(d *Driver) {
+				d.volumeLocks.Release(lockKey)
+			},
+		},
+		{
+			desc: "Valid request with sub-dir",
+			setup: func(d *Driver) {
+				volumeCap := csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER}
+				req := csi.NodeStageVolumeRequest{
+					VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
+						Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
+					}},
+					VolumeId:          "vol_1#lustrefs#1.1.1.1#testSubDir",
+					StagingTargetPath: targetTest,
+					VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
+				}
+				_, err := d.NodeStageVolume(context.Background(), &req)
+				require.NoError(t, err)
+			},
+			req:                  csi.NodeUnstageVolumeRequest{StagingTargetPath: targetTest, VolumeId: "vol_1#lustrefs#1.1.1.1#testSubDir"},
+			expectedErr:          nil,
+			expectExistingSubDir: true,
+			expectedMountpoints:  []mount.MountPoint{},
+			expectedMountActions: []mount.FakeAction{
+				{Action: "unmount", Target: targetTest, Source: "", FSType: ""},
+			},
+		},
+	}
+
+	// Setup
+	d := NewFakeDriver()
+
+	for i := range tests {
+		test := &tests[i]
+		require.NotNil(t, test.expectedMountActions, "test.expectedMountActions must be non-nil")
+		fakeMounter := &fakeMounter{}
+		fakeExec := &testingexec.FakeExec{ExactOrder: true}
+		d.mounter = &mount.SafeFormatAndMount{
+			Interface: fakeMounter,
+			Exec:      fakeExec,
+		}
+		forceMounter, ok := d.mounter.Interface.(mount.MounterForceUnmounter)
+		require.True(t, ok, "Mounter should implement MounterForceUnmounter")
+		d.forceMounter = &forceMounter
+		err := makeDir(targetTest)
+		require.NoError(t, err)
+
+		if test.setup != nil {
+			test.setup(d)
+		}
+
+		fakeMounter.ResetLog()
+
+		t.Run(test.desc, func(t *testing.T) {
+			_, err = d.NodeUnstageVolume(context.Background(), &test.req)
+			if !reflect.DeepEqual(err, test.expectedErr) {
+				t.Fatalf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
+			}
+
+			mountPoints, err := d.mounter.List()
+			require.NoError(t, err)
+			assert.Equal(t, test.expectedMountpoints, mountPoints, "Desc: %s - Incorrect mount points: %v - Expected: %v", test.desc, mountPoints, test.expectedMountpoints)
+			mountActions := fakeMounter.GetLog()
+			assert.Equal(t, test.expectedMountActions, mountActions, "Desc: %s - Incorrect mount actions: %v - Expected: %v", test.desc, mountActions, test.expectedMountActions)
+		})
+
+		if test.cleanup != nil {
+			test.cleanup(d)
+		}
+
+		err = d.mounter.Unmount(targetTest)
+		require.NoError(t, err)
+		err = os.RemoveAll(targetTest)
+		require.NoError(t, err)
+		err = d.mounter.Unmount(sourceTest)
+		require.NoError(t, err)
+		err = os.RemoveAll(sourceTest)
+		assert.NoError(t, err)
 	}
 }
 
 func TestNodeUnpublishVolume(t *testing.T) {
-	workingDirectory, err := os.Getwd()
-	if err != nil {
-		t.Errorf("failed to get current working directory")
-	}
-
-	workingMountDir := filepath.Join(workingDirectory, "workingMountDir")
 	lockKey := fmt.Sprintf("%s-%s", "vol_1#lustrefs#1.1.1.1#testSubDir", targetTest)
 
 	tests := []struct {
@@ -631,7 +966,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 			expectedMountActions: []mount.FakeAction{},
 		},
 		{
-			desc:                 "Cannot find mount point",
+			desc:                 "Unmount when not mounted succeeds",
 			req:                  csi.NodeUnpublishVolumeRequest{TargetPath: targetTest, VolumeId: "vol_1#lustrefs#1.1.1.1#testSubDir"},
 			expectedErr:          nil,
 			expectExistingSubDir: false,
@@ -646,10 +981,11 @@ func TestNodeUnpublishVolume(t *testing.T) {
 					VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 						Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 					}},
-					VolumeId:      "vol_1#lustrefs#1.1.1.1",
-					TargetPath:    targetTest,
-					VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
-					Readonly:      false,
+					VolumeId:          "vol_1#lustrefs#1.1.1.1",
+					TargetPath:        targetTest,
+					StagingTargetPath: sourceTest,
+					VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+					Readonly:          false,
 				}
 				_, err := d.NodePublishVolume(context.Background(), &req)
 				require.NoError(t, err)
@@ -659,7 +995,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 			expectExistingSubDir: false,
 			expectedMountpoints:  []mount.MountPoint{},
 			expectedMountActions: []mount.FakeAction{
-				{Action: "unmount", Target: "target_test", Source: "", FSType: ""},
+				{Action: "unmount", Target: targetTest, Source: "", FSType: ""},
 			},
 		},
 		{
@@ -684,10 +1020,11 @@ func TestNodeUnpublishVolume(t *testing.T) {
 					VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 						Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 					}},
-					VolumeId:      "vol_1#lustrefs#1.1.1.1#testSubDir",
-					TargetPath:    targetTest,
-					VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
-					Readonly:      false,
+					VolumeId:          "vol_1#lustrefs#1.1.1.1#testSubDir",
+					TargetPath:        targetTest,
+					StagingTargetPath: sourceTest,
+					VolumeContext:     map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
+					Readonly:          false,
 				}
 				_, err := d.NodePublishVolume(context.Background(), &req)
 				require.NoError(t, err)
@@ -697,35 +1034,17 @@ func TestNodeUnpublishVolume(t *testing.T) {
 			expectExistingSubDir: true,
 			expectedMountpoints:  []mount.MountPoint{},
 			expectedMountActions: []mount.FakeAction{
-				{Action: "unmount", Target: "target_test", Source: "", FSType: ""},
-			},
-		},
-		{
-			desc: "Valid request with unexpected ID skips cleanup",
-			setup: func(d *Driver) {
-				err = makeDir(targetTest)
-				require.NoError(t, err)
-				err = makeDir(filepath.Join(workingMountDir, targetTest, subDir))
-				require.NoError(t, err)
-				err = d.mounter.Mount("1.1.1.1@tcp:/lustrefs/"+subDir, targetTest, "lustre", []string{"noatime", "flock"})
-				require.NoError(t, err)
-			},
-			req:                  csi.NodeUnpublishVolumeRequest{TargetPath: targetTest, VolumeId: "vol_1"},
-			expectedErr:          nil,
-			expectExistingSubDir: true,
-			expectedMountpoints:  []mount.MountPoint{},
-			expectedMountActions: []mount.FakeAction{
-				{Action: "unmount", Target: "target_test", Source: "", FSType: ""},
+				{Action: "unmount", Target: targetTest, Source: "", FSType: ""},
 			},
 		},
 	}
 
 	// Setup
 	d := NewFakeDriver()
-	d.workingMountDir = workingMountDir
 
 	for i := range tests {
 		test := &tests[i]
+		require.NotNil(t, test.expectedMountActions, "test.expectedMountActions must be non-nil")
 		fakeMounter := &fakeMounter{}
 		fakeExec := &testingexec.FakeExec{ExactOrder: true}
 		d.mounter = &mount.SafeFormatAndMount{
@@ -747,39 +1066,37 @@ func TestNodeUnpublishVolume(t *testing.T) {
 		t.Run(test.desc, func(t *testing.T) {
 			_, err := d.NodeUnpublishVolume(context.Background(), &test.req)
 			if !reflect.DeepEqual(err, test.expectedErr) {
-				t.Errorf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
+				t.Fatalf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
 			}
 			mountPoints, err := d.mounter.List()
 			require.NoError(t, err)
 			assert.Equal(t, test.expectedMountpoints, mountPoints, "Desc: %s - Incorrect mount points: %v - Expected: %v", test.desc, mountPoints, test.expectedMountpoints)
 			mountActions := fakeMounter.GetLog()
 			assert.Equal(t, test.expectedMountActions, mountActions, "Desc: %s - Incorrect mount actions: %v - Expected: %v", test.desc, mountActions, test.expectedMountActions)
-			internalMountDir := filepath.Join(d.workingMountDir, targetTest)
+			subDirPath := filepath.Join(sourceTest, subDir)
 			if test.expectedErr == nil {
-				subDirPath := filepath.Join(internalMountDir, subDir)
-
 				if test.expectExistingSubDir {
 					assert.DirExists(t, subDirPath, "Expected sub-dir %q to be created", subDirPath)
 				} else {
 					assert.NoDirExists(t, subDirPath, "Expected sub-dir %q not to exist", subDirPath)
 				}
 			}
-			err = d.mounter.Unmount(internalMountDir)
+			err = d.mounter.Unmount(subDirPath)
 			require.NoError(t, err)
-			err = os.RemoveAll(internalMountDir)
+			err = os.RemoveAll(subDirPath)
 			require.NoError(t, err)
 		})
 		if test.cleanup != nil {
 			test.cleanup(d)
 		}
 
-		err = d.mounter.Unmount(d.workingMountDir)
-		require.NoError(t, err)
-		err = os.RemoveAll(d.workingMountDir)
-		require.NoError(t, err)
 		err = d.mounter.Unmount(targetTest)
 		require.NoError(t, err)
 		err = os.RemoveAll(targetTest)
+		require.NoError(t, err)
+		err = d.mounter.Unmount(sourceTest)
+		require.NoError(t, err)
+		err = os.RemoveAll(sourceTest)
 		require.NoError(t, err)
 	}
 }
@@ -803,7 +1120,7 @@ func TestMakeDir(t *testing.T) {
 	err = makeDir("./azurelustre.go")
 	var e *os.PathError
 	if !errors.As(err, &e) {
-		t.Errorf("Unexpected Error: %v", err)
+		t.Fatalf("Unexpected Error: %v", err)
 	}
 
 	// Remove the directory created
@@ -870,7 +1187,7 @@ func TestNodeGetVolumeStats(t *testing.T) {
 		t.Run(test.desc, func(t *testing.T) {
 			_, err := d.NodeGetVolumeStats(context.Background(), &test.req)
 			if !reflect.DeepEqual(err, test.expectedErr) {
-				t.Errorf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
+				t.Fatalf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
 			}
 		})
 	}
@@ -924,94 +1241,47 @@ func TestEnsureStrictSubpath(t *testing.T) {
 
 func TestGetInternalVolumePath(t *testing.T) {
 	cases := []struct {
-		desc            string
-		workingMountDir string
-		mountPath       string
-		subDirPath      string
-		result          string
-		expectedErr     error
+		desc        string
+		mountPath   string
+		subDirPath  string
+		result      string
+		expectedErr error
 	}{
 		{
-			desc:            "empty sub-dir",
-			workingMountDir: "/tmp",
-			mountPath:       targetTest,
-			subDirPath:      "",
-			result:          "",
-			expectedErr:     status.Error(codes.InvalidArgument, "sub-dir \"\" must be strict subpath"),
+			desc:        "empty sub-dir",
+			mountPath:   targetTest,
+			subDirPath:  "",
+			result:      "",
+			expectedErr: status.Error(codes.InvalidArgument, "sub-dir \"\" must be strict subpath"),
 		},
 		{
-			desc:            "valid sub-dir",
-			workingMountDir: "/tmp",
-			mountPath:       targetTest,
-			subDirPath:      "testSubDir",
-			result:          filepath.Join("/tmp", "target_test/testSubDir"),
-			expectedErr:     nil,
+			desc:        "valid sub-dir",
+			mountPath:   targetTest,
+			subDirPath:  subDir,
+			result:      filepath.Join(targetTest, subDir),
+			expectedErr: nil,
 		},
 		{
-			desc:            "valid volume with multiple sub-dir levels",
-			workingMountDir: "/tmp",
-			mountPath:       targetTest,
-			subDirPath:      "testSubDir/nestedSubDir",
-			result:          filepath.Join("/tmp", "target_test/testSubDir/nestedSubDir"),
-			expectedErr:     nil,
+			desc:        "valid volume with multiple sub-dir levels",
+			mountPath:   targetTest,
+			subDirPath:  "testSubDir/nestedSubDir",
+			result:      filepath.Join(targetTest, "testSubDir/nestedSubDir"),
+			expectedErr: nil,
 		},
 		{
-			desc:            "invalid sub-dir that would go to parent dir",
-			workingMountDir: "/tmp",
-			mountPath:       targetTest,
-			subDirPath:      "../testSubDir",
-			result:          "",
-			expectedErr:     status.Error(codes.InvalidArgument, "sub-dir \"../testSubDir\" must be strict subpath"),
+			desc:        "invalid sub-dir that would go to parent dir",
+			mountPath:   targetTest,
+			subDirPath:  "../testSubDir",
+			result:      "",
+			expectedErr: status.Error(codes.InvalidArgument, "sub-dir \"../testSubDir\" must be strict subpath"),
 		},
 	}
 
 	for _, test := range cases {
 		t.Run(test.desc, func(t *testing.T) {
-			path, err := getInternalVolumePath(test.workingMountDir, test.mountPath, test.subDirPath)
+			path, err := getInternalVolumePath(test.mountPath, test.subDirPath)
 			if !reflect.DeepEqual(err, test.expectedErr) {
-				t.Errorf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
-			}
-			assert.Equal(t, test.result, path)
-		})
-	}
-}
-
-func TestGetInternalMountPath(t *testing.T) {
-	cases := []struct {
-		desc            string
-		workingMountDir string
-		mountPath       string
-		result          string
-		expectedErr     error
-	}{
-		{
-			desc:            "empty mount path",
-			workingMountDir: "/tmp",
-			mountPath:       "",
-			result:          "",
-			expectedErr:     status.Error(codes.Internal, "invalid mount path \"\""),
-		},
-		{
-			desc:            "valid mount path",
-			workingMountDir: "/tmp",
-			mountPath:       "/mount_path",
-			result:          filepath.Join("/tmp", "mount_path"),
-			expectedErr:     nil,
-		},
-		{
-			desc:            "invalid path that would go to parent dir",
-			workingMountDir: "/tmp",
-			mountPath:       "../invalid",
-			result:          "",
-			expectedErr:     status.Error(codes.Internal, "invalid mount path \"../invalid\""),
-		},
-	}
-
-	for _, test := range cases {
-		t.Run(test.desc, func(t *testing.T) {
-			path, err := getInternalMountPath(test.workingMountDir, test.mountPath)
-			if !reflect.DeepEqual(err, test.expectedErr) {
-				t.Errorf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
+				t.Fatalf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
 			}
 			assert.Equal(t, test.result, path)
 		})
@@ -1069,14 +1339,14 @@ func TestNewLustreVolume(t *testing.T) {
 			params: map[string]string{
 				"mgs-ip-address": "1.1.1.1",
 				"fs-name":        "lustrefs",
-				"sub-dir":        "testSubDir",
+				"sub-dir":        subDir,
 			},
 			expectedLustreVolume: &lustreVolume{
 				id:              "vol_1#lustrefs#1.1.1.1#testSubDir",
 				name:            "vol_1",
 				azureLustreName: "lustrefs",
 				mgsIPAddress:    "1.1.1.1",
-				subDir:          "testSubDir",
+				subDir:          subDir,
 			},
 		},
 		{
@@ -1104,14 +1374,14 @@ func TestNewLustreVolume(t *testing.T) {
 			params: map[string]string{
 				"mgs-ip-address": "1.1.1.1",
 				"fs-name":        "lustrefs",
-				"sub-dir":        "testSubDir",
+				"sub-dir":        subDir,
 			},
 			expectedLustreVolume: &lustreVolume{
 				id:              "vol_1#otherfs#2.2.2.2#otherSubDir",
 				name:            "vol_1",
 				azureLustreName: "lustrefs",
 				mgsIPAddress:    "1.1.1.1",
-				subDir:          "testSubDir",
+				subDir:          subDir,
 			},
 			expectedErr: nil,
 		},
@@ -1143,7 +1413,7 @@ func TestNewLustreVolume(t *testing.T) {
 		t.Run(test.desc, func(t *testing.T) {
 			vol, err := newLustreVolume(test.id, test.volName, test.params)
 			if !reflect.DeepEqual(err, test.expectedErr) {
-				t.Errorf("[test: %s] Unexpected error: %v, expected error: %v", test.desc, err, test.expectedErr)
+				t.Fatalf("[test: %s] Unexpected error: %v, expected error: %v", test.desc, err, test.expectedErr)
 			}
 			assert.Equal(t, test.expectedLustreVolume, vol, "Desc: %s - Incorrect lustre volume: %v - Expected: %v", test.desc, vol, test.expectedLustreVolume)
 		})

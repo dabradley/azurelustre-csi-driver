@@ -112,7 +112,7 @@ if [[ "${installClientPackages}" == "yes" ]]; then
     # grub issue
     # https://stackoverflow.com/questions/40748363/virtual-machine-apt-get-grub-issue/40751712
     if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::options::="--force-confdef" -o DPkg::options::="--force-confold" \
-      ${pkgName}=${kernelVersion}; then
+      /app/kmod-lustre-client-5.15.0-1098-azure-2.15.7_1_amd64.deb  /app/lustre-client-2.15.7_1_amd64.deb; then
       echo "$(date -u) Error installing Lustre client modules. Will try removing existing versions"
       # Check if lustre_rmmod is available, attempt to unload the modules if so.
       # If modules are already uninstalled, this will still pass

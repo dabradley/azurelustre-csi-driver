@@ -96,6 +96,7 @@ var (
 	nodeServiceCapabilities = []csi.NodeServiceCapability_RPC_Type{
 		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
 		csi.NodeServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
+		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
 	}
 )
 
@@ -115,7 +116,6 @@ type DriverOptions struct {
 	DriverName                   string
 	EnableAzureLustreMockMount   bool
 	EnableAzureLustreMockDynProv bool
-	WorkingMountDir              string
 	RemoveNotReadyTaint          bool
 }
 
@@ -139,8 +139,6 @@ type Driver struct {
 	mounter                      *mount.SafeFormatAndMount
 	forceMounter                 *mount.MounterForceUnmounter
 	volLockMap                   *util.LockMap
-	// Directory to temporarily mount to for subdirectory creation
-	workingMountDir string
 	// A map storing all volumes with ongoing operations so that additional operations
 	// for that same volume (as defined by VolumeID) return an Aborted error
 	volumeLocks      *volumeLocks
@@ -167,7 +165,6 @@ func NewDriver(options *DriverOptions) *Driver {
 		volumeLocks:                  newVolumeLocks(),
 		enableAzureLustreMockMount:   options.EnableAzureLustreMockMount,
 		enableAzureLustreMockDynProv: options.EnableAzureLustreMockDynProv,
-		workingMountDir:              options.WorkingMountDir,
 		removeNotReadyTaint:          options.RemoveNotReadyTaint,
 	}
 	d.Name = options.DriverName

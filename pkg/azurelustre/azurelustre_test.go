@@ -158,7 +158,6 @@ func TestNewDriver(t *testing.T) {
 		DriverName:                   fakeDriverName,
 		EnableAzureLustreMockMount:   false,
 		EnableAzureLustreMockDynProv: true,
-		WorkingMountDir:              "/tmp",
 		RemoveNotReadyTaint:          true,
 	}
 	d := NewDriver(&driverOptions)
@@ -175,7 +174,6 @@ func TestNewDriver(t *testing.T) {
 	assert.Equal(t, "fake-client-secret", d.cloud.AADClientSecret)
 	assert.Equal(t, "fake-location", d.cloud.Location)
 	assert.Equal(t, "fake-resource-group", d.cloud.ResourceGroup)
-	assert.Equal(t, "/tmp", d.workingMountDir)
 	assert.True(t, d.enableAzureLustreMockDynProv, "enableAzureLustreMockDynProv should be true")
 	assert.False(t, d.enableAzureLustreMockMount, "enableAzureLustreMockMount should be false")
 	assert.True(t, d.removeNotReadyTaint, "removeNotReadyTaint should be true")
@@ -195,7 +193,6 @@ func TestNewDriverInvalidConfigFileLocation(t *testing.T) {
 		DriverName:                   fakeDriverName,
 		EnableAzureLustreMockMount:   false,
 		EnableAzureLustreMockDynProv: true,
-		WorkingMountDir:              "/tmp",
 		RemoveNotReadyTaint:          true,
 	}
 	d := NewDriver(&driverOptions)
@@ -225,7 +222,6 @@ func TestNewDriverInvalidConfigFileContents(t *testing.T) {
 		DriverName:                   fakeDriverName,
 		EnableAzureLustreMockMount:   false,
 		EnableAzureLustreMockDynProv: true,
-		WorkingMountDir:              "/tmp",
 		RemoveNotReadyTaint:          true,
 	}
 	d := NewDriver(&driverOptions)

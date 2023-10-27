@@ -17,6 +17,8 @@ FROM ubuntu:22.04
 COPY "./_output/azurelustreplugin" "/app/azurelustreplugin"
 COPY "./pkg/azurelustreplugin/entrypoint.sh" "/app/entrypoint.sh"
 COPY "./pkg/azurelustreplugin/readinessProbe.sh" "/app/readinessProbe.sh"
+COPY "./debs/kmod-lustre-client-5.15.0-1098-azure-2.15.7_1_amd64.deb" "/app/kmod-lustre-client-5.15.0-1098-azure-2.15.7_1_amd64.deb"
+COPY "./debs/lustre-client-2.15.7_1_amd64.deb" "/app/lustre-client-2.15.7_1_amd64.deb"
 
 RUN chmod +x "/app/entrypoint.sh" && chmod +x "/app/readinessProbe.sh"
 
