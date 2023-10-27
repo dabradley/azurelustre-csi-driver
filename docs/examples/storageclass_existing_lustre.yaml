@@ -8,7 +8,7 @@ parameters:
   # See the driver-parameters.md file for a full description of parameters.
   #
   # The IP address of the existing Lustre
-  mgs-ip-address: ${EXISTING_LUSTRE_IP_ADDRESS}
+  mgs-ip-address: 10.0.4.11
   #
   # The subdirectory within the AMLFS cluster's root directory which is where each pod will actually be mounted within the AMLFS filesystem.
   # This subdirectory does not need to exist beforehand. This must be a valid Linux file path.
@@ -17,8 +17,9 @@ parameters:
   #
 provisioner: azurelustre.csi.azure.com
 # Azure Managed Lustre cluster is removed after PVC deletion if reclaimPolicy is the default value "Delete".
-reclaimPolicy: Retain
+reclaimPolicy: Delete
 volumeBindingMode: Immediate
 mountOptions:
   - noatime
   - flock
+  - no_share_fsid

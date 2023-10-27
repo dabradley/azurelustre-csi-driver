@@ -75,3 +75,5 @@ cscope.*
 /bazel-*
 *.pyc
 profile.cov
+
+.jjconflict*/**

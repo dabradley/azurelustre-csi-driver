@@ -2,7 +2,7 @@
 kind: Pod
 apiVersion: v1
 metadata:
-  name: lustre-echo-date-subdir
+  name: lustre-echo-date-subdir-3
 spec:
   nodeSelector:
     "kubernetes.io/os": linux

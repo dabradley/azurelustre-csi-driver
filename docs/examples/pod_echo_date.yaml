@@ -2,7 +2,7 @@
 kind: Pod
 apiVersion: v1
 metadata:
-  name: lustre-echo-date
+  name: lustre-echo-date-6
 spec:
   nodeSelector:
     "kubernetes.io/os": linux
@@ -12,11 +12,20 @@ spec:
       command:
         - "/bin/sh"
         - "-c"
-        - while true; do echo $(date) >> /mnt/lustre/outfile; sleep 1; done
+        - while true; do echo $(date) >> /mnt/lustre/outfile; tail /mnt/lustre/outfile; sleep 1; done
+      volumeMounts:
+        - name: lustre01
+          mountPath: "/mnt/lustre"
+    - image: mcr.microsoft.com/azurelinux/base/core:3.0
+      name: lustre-echo-date-2
+      command:
+        - "/bin/sh"
+        - "-c"
+        - while true; do echo $(date) >> /mnt/lustre/outfile-2; tail /mnt/lustre/outfile-2; sleep 1; done
       volumeMounts:
         - name: lustre01
           mountPath: "/mnt/lustre"
   volumes:
     - name: lustre01
       persistentVolumeClaim:
-        claimName: pvc-lustre
+        claimName: pvc-lustre-2

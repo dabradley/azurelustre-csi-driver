@@ -3,10 +3,10 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   # The name of the PVC
-  name: pvc-lustre
+  name: pvc-lustre-1
 spec:
   accessModes:
-    - ReadWriteMany
+    - ReadOnlyMany
   resources:
     requests:
       # The real storage capacity in the claim

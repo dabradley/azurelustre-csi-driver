@@ -6,7 +6,7 @@ metadata:
   name: subdir.azurelustre.csi.azure.com
 parameters:
   # The IP address of the existing Lustre
-  mgs-ip-address: ${EXISTING_LUSTRE_IP_ADDRESS}
+  mgs-ip-address: 10.0.4.11
   # The subdirectory to create and mount per pod
   sub-dir: "${pvc.metadata.name}_${pod.metadata.name}"
 provisioner: azurelustre.csi.azure.com
@@ -15,3 +15,4 @@ volumeBindingMode: Immediate
 mountOptions:
   - noatime
   - flock
+  - no_share_fsid
