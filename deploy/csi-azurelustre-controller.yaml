@@ -69,7 +69,7 @@ spec:
               memory: 20Mi
         - name: azurelustre
           image: mcr.microsoft.com/oss/kubernetes-csi/azurelustre-csi:v0.1.15
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           args:
             - "-v=5"
             - "--endpoint=$(CSI_ENDPOINT)"
