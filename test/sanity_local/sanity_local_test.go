@@ -43,9 +43,10 @@ func TestSanity(t *testing.T) {
 		azurelustre.VolumeContextFSName:       "test",
 	}
 	driverOptions := azurelustre.DriverOptions{
-		NodeID:                     "fakeNodeID",
-		DriverName:                 "fake",
-		EnableAzureLustreMockMount: true,
+		NodeID:                       "fakeNodeID",
+		DriverName:                   "fake",
+		EnableAzureLustreMockMount:   true,
+		EnableAzureLustreMockDynProv: true,
 	}
 	driver := azurelustre.NewDriver(&driverOptions)
 	go func() {
