@@ -1,0 +1,39 @@
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  # The name of the StorageClass.
+  name: dynprov.azurelustre.csi.azure.com
+parameters:
+  # amlfilesystem-name can interpret metadata such as
+  #  "${pvc.metadata.name}"
+  #  "${pvc.metadata.namespace}"
+  #  "${pv.metadata.name}"
+  amlfilesystem-name: "davidbradley-amlfs-${pvc.metadata.name}"
+  # location to create the AMLFS cluster
+  location: eastus2 # defaults to AKS location
+  # vnet resource group the AMLFS cluster will use
+  vnet-resource-group: davidbradley-amlfs-test-2
+  # vnet name the AMLFS cluster will use
+  vnet-name: davidbradley-amlfs-test-2
+  # subnet within the vnet that the AMLFS cluster will use
+  subnet-name: default2
+  maintenance-day-of-week: Sunday
+  time-of-day-utc: "02:00"
+  # "sku-name" must be one of
+  # "AMLFS-Durable-Premium-40"
+  # "AMLFS-Durable-Premium-125"
+  # "AMLFS-Durable-Premium-250"
+  # "AMLFS-Durable-Premium-500"
+  sku-name: AMLFS-Durable-Premium-40
+  zones: "1,"
+  tags: "owner=davidbradley"
+  # resource-group-name: davidbradley-amlfs-rg # defaults to AKS resource group
+  # identities: "identity1,identity2"
+provisioner: azurelustre.csi.azure.com
+# Azure Lustre Cluster is removed after PVC deletion if reclaimPolicy is the default value "Delete".
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+mountOptions:
+  - noatime
+  - flock

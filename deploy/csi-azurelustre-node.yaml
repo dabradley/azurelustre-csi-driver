@@ -84,8 +84,8 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: azurelustre
-          image: mcr.microsoft.com/oss/kubernetes-csi/azurelustre-csi:v0.1.17
-          imagePullPolicy: IfNotPresent
+          image: davidbradleycsitestacr.azurecr.io/oss/kubernetes-csi/azurelustre-csi:v0.1.16-dynprov
+          imagePullPolicy: Always
           lifecycle:
             preStop:
               exec:

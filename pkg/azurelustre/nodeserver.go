@@ -41,8 +41,8 @@ func (d *Driver) NodePublishVolume(
 ) (*csi.NodePublishVolumeResponse, error) {
 	mc := metrics.NewMetricContext(azureLustreCSIDriverName,
 		"node_publish_volume",
-		"",
-		"",
+		d.resourceGroup,
+		d.cloud.SubscriptionID,
 		d.Name)
 
 	volCap := req.GetVolumeCapability()
@@ -203,7 +203,7 @@ func interpolateSubDirVariables(context map[string]string, vol *lustreVolume) st
 		}
 	}
 
-	interpolatedSubDir := replaceWithMap(vol.subDir, subDirReplaceMap)
+	interpolatedSubDir := volumehelper.ReplaceWithMap(vol.subDir, subDirReplaceMap)
 	return interpolatedSubDir
 }
 
@@ -229,6 +229,7 @@ func getMountOptions(req *csi.NodePublishVolumeRequest, userMountFlags []string)
 
 func getVolume(volumeID string, context map[string]string) (*lustreVolume, error) {
 	volName := ""
+	klog.Infof("context '%#v'", context)
 
 	volFromID, err := getLustreVolFromID(volumeID)
 	if err != nil {
@@ -237,13 +238,17 @@ func getVolume(volumeID string, context map[string]string) (*lustreVolume, error
 		volName = volFromID.name
 	}
 
+	// TODO: Handle nonstandard volume names (shouldn't be dynprov)
 	vol, err := newLustreVolume(volumeID, volName, context)
 	if err != nil {
 		return nil, err
 	}
-
+	// volume context does not match values in volume ID for volume "pvc-66a732c5-e37a-41d0-b62a-4b05d479ff89#lustrefs#10.2.0.5##davidbradley-amlfs-dyn-test"
+	// controllerserver needs to add amlfs name to context if exists ?
 	if volFromID != nil && *volFromID != *vol {
 		klog.Warningf("volume context does not match values in volume ID for volume %q", volumeID)
+		klog.Warningf("vol %#v", vol)
+		klog.Warningf("volFromID %#v", volFromID)
 	}
 
 	return vol, nil
@@ -270,8 +275,8 @@ func (d *Driver) NodeUnpublishVolume(
 ) (*csi.NodeUnpublishVolumeResponse, error) {
 	mc := metrics.NewMetricContext(azureLustreCSIDriverName,
 		"node_unpublish_volume",
-		"",
-		"",
+		d.resourceGroup,
+		d.cloud.SubscriptionID,
 		d.Name)
 
 	volumeID := req.GetVolumeId()
@@ -704,38 +709,9 @@ func ensureStrictSubpath(subPath string) bool {
 	return filepath.IsLocal(subPath) && filepath.Clean(subPath) != "."
 }
 
-type lustreVolume struct {
-	name            string
-	id              string
-	mgsIPAddress    string
-	azureLustreName string
-	subDir          string
-}
-
-func getLustreVolFromID(id string) (*lustreVolume, error) {
-	segments := strings.Split(id, separator)
-	if len(segments) < 3 {
-		return nil, fmt.Errorf("could not split volume ID %q into lustre name and ip address", id)
-	}
-
-	name := segments[0]
-	vol := &lustreVolume{
-		name:            name,
-		id:              id,
-		azureLustreName: strings.Trim(segments[1], "/"),
-		mgsIPAddress:    segments[2],
-	}
-
-	if len(segments) >= 4 {
-		vol.subDir = strings.Trim(segments[3], "/")
-	}
-
-	return vol, nil
-}
-
 // Convert context parameters to a lustreVolume
 func newLustreVolume(volumeID, volumeName string, params map[string]string) (*lustreVolume, error) {
-	var mgsIPAddress, azureLustreName, subDir string
+	var mgsIPAddress, azureLustreName, subDir, amlFilesystemName, resourceGroupName string
 	// validate parameters (case-insensitive).
 	for k, v := range params {
 		switch strings.ToLower(k) {
@@ -753,6 +729,10 @@ func newLustreVolume(volumeID, volumeName string, params map[string]string) (*lu
 					"Context sub-dir must not be empty or root if provided",
 				)
 			}
+		case VolumeContextAmlFilesystemName:
+			amlFilesystemName = v
+		case VolumeContextResourceGroupName:
+			resourceGroupName = v
 		}
 	}
 
@@ -772,11 +752,13 @@ func newLustreVolume(volumeID, volumeName string, params map[string]string) (*lu
 	}
 
 	vol := &lustreVolume{
-		name:            volumeName,
-		mgsIPAddress:    mgsIPAddress,
-		azureLustreName: azureLustreName,
-		subDir:          subDir,
-		id:              volumeID,
+		name:              volumeName,
+		mgsIPAddress:      mgsIPAddress,
+		azureLustreName:   azureLustreName,
+		subDir:            subDir,
+		id:                volumeID,
+		amlFilesystemName: amlFilesystemName,
+		resourceGroupName: resourceGroupName,
 	}
 
 	return vol, nil
