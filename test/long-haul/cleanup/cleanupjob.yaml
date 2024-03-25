@@ -39,7 +39,7 @@ spec:
           command:
             - "/bin/sh"
             - "-c"
-            - rm -rf /mnt/azurelustre_longhaulcleanup/*
+            - rm -rf /mnt/azurelustre_longhaulcleanup/longhaul/*
           volumeMounts:
             - name: azurelustre-longhaulcleanup-volume
               mountPath: "/mnt/azurelustre_longhaulcleanup"
