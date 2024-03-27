@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	volumehelper "sigs.k8s.io/azurelustre-csi-driver/pkg/util"
 	"sigs.k8s.io/cloud-provider-azure/pkg/metrics"
@@ -283,8 +284,8 @@ func (d *Driver) NodeUnpublishVolume(
 	klog.V(2).Infof("NodeUnpublishVolume: unmounting volume %s on %s",
 		volumeID, targetPath)
 	d.kernelModuleLock.Lock()
-	err := mount.CleanupMountPoint(targetPath, d.mounter,
-		true /*extensiveMountPointCheck*/)
+	err := mount.CleanupMountWithForce(targetPath, *d.forceMounter,
+		true /*extensiveMountPointCheck*/, 10*time.Second)
 	d.kernelModuleLock.Unlock()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal,
@@ -639,7 +640,7 @@ func (d *Driver) internalUnmount(mountPath string) error {
 
 	klog.V(4).Infof("internally unmounting %v", target)
 
-	err = mount.CleanupMountPoint(target, d.mounter, true)
+	err = mount.CleanupMountWithForce(target, *d.forceMounter, true, 10*time.Second)
 	if err != nil {
 		err = status.Errorf(codes.Internal, "failed to unmount staging target %q: %v", target, err)
 	}

@@ -116,6 +116,8 @@ func TestEnsureMountPoint(t *testing.T) {
 		Interface: fakeMounter,
 		Exec:      fakeExec,
 	}
+	forceMounter := d.mounter.Interface.(mount.MounterForceUnmounter)
+	d.forceMounter = &forceMounter
 
 	for _, test := range tests {
 		test := test // pin
@@ -544,6 +546,8 @@ func TestNodePublishVolume(t *testing.T) {
 			Interface: fakeMounter,
 			Exec:      fakeExec,
 		}
+		forceMounter := d.mounter.Interface.(mount.MounterForceUnmounter)
+		d.forceMounter = &forceMounter
 		d.workingMountDir = workingMountDir
 		_ = makeDir(targetTest)
 		_ = makeDir(alreadyExistTarget)
@@ -736,6 +740,8 @@ func TestNodeUnpublishVolume(t *testing.T) {
 			Interface: fakeMounter,
 			Exec:      fakeExec,
 		}
+		forceMounter := d.mounter.Interface.(mount.MounterForceUnmounter)
+		d.forceMounter = &forceMounter
 		_ = makeDir(targetTest)
 
 		if test.setup != nil {
