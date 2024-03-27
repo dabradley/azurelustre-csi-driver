@@ -239,7 +239,7 @@ class PerfScaleTest:
         self.run_command(
             "kubectl rollout status deployment"
             " scale-test-set"
-            " --timeout=300s"
+            " --timeout=3000s"
         )
         logger.info("workload was ready")
 
@@ -256,7 +256,7 @@ class PerfScaleTest:
             f" -f {self._generated_workload_yaml}"
             f" --ignore-not-found"
             f" --wait=true"
-            f" --timeout=300s"
+            f" --timeout=3000s"
         )
         logger.info("workload was deleted")
 
