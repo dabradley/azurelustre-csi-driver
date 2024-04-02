@@ -283,8 +283,36 @@ func (d *Driver) NodeUnpublishVolume(
 
 	klog.V(2).Infof("NodeUnpublishVolume: unmounting volume %s on %s",
 		volumeID, targetPath)
+	shouldUnmountBadPath := false
 	d.kernelModuleLock.Lock()
-	err := mount.CleanupMountWithForce(targetPath, *d.forceMounter,
+	parent := filepath.Dir(targetPath)
+	klog.V(2).Infof("Listing dir: %s",
+		parent)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		klog.Infof("couldnt list directory %s, will try to unmount path %s: %q", parent, targetPath, err)
+		shouldUnmountBadPath = true
+	}
+
+	for _, e := range entries {
+		if e.Name() == filepath.Base(targetPath) {
+			_, err := e.Info()
+			if err != nil {
+				klog.Infof("couldnt get info for entry %s, will try to unmount path %s: %q", e.Name(), targetPath, err)
+				shouldUnmountBadPath = true
+			}
+		}
+	}
+
+	if shouldUnmountBadPath {
+		klog.V(4).Infof("unmounting bad mount: %s)", targetPath)
+		forceUnmounter := *d.forceMounter
+		if err := forceUnmounter.UnmountWithForce(targetPath, 30*time.Second); err != nil {
+			klog.Infof("couldn't unmount %s: %q", targetPath, err)
+		}
+	}
+
+	err = mount.CleanupMountWithForce(targetPath, *d.forceMounter,
 		true /*extensiveMountPointCheck*/, 10*time.Second)
 	d.kernelModuleLock.Unlock()
 	if err != nil {
