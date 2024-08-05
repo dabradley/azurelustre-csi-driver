@@ -5,8 +5,8 @@ metadata:
   name: azurelustre-longhaulcleanup-sc
 provisioner: azurelustre.csi.azure.com
 parameters:
-  mgs-ip-address: "{lustre_fs_ip}"
-  fs-name: "{lustre_fs_name}"
+  mgs-ip-address: "10.0.40.7"
+  fs-name: "lustrefs"
   sub-dir: "longhaul"
 
 ---
@@ -32,7 +32,7 @@ spec:
     spec:
       nodeSelector:
         "kubernetes.io/os": linux
-        "agentpool": {longhaul_agentpool}
+        "agentpool": systempool
       containers:
         - name: azurelustre-longhaulcleanup-container
           image: busybox

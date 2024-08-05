@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -40,7 +42,7 @@ import (
 
 // NodePublishVolume mount the volume from staging to target path
 func (d *Driver) NodePublishVolume(
-	_ context.Context,
+	ctx context.Context,
 	req *csi.NodePublishVolumeRequest,
 ) (*csi.NodePublishVolumeResponse, error) {
 	mc := metrics.NewMetricContext(azureLustreCSIDriverName,
@@ -48,6 +50,12 @@ func (d *Driver) NodePublishVolume(
 		"",
 		"",
 		d.Name)
+
+	klog.Infof("context: %q", ctx)
+	debug.PrintStack()
+	buf := make([]byte, 1<<16)
+	runtime.Stack(buf, true)
+	fmt.Printf("%s", buf)
 
 	volCap := req.GetVolumeCapability()
 	if volCap == nil {
@@ -120,7 +128,10 @@ func (d *Driver) NodePublishVolume(
 			volumeOperationAlreadyExistsFmt,
 			volumeID)
 	}
-	defer d.volumeLocks.Release(lockKey)
+	defer func() {
+		klog.Warningf("Releasing lock %q!", lockKey)
+		defer d.volumeLocks.Release(lockKey)
+	}()
 
 	isOperationSucceeded := false
 	defer func() {
@@ -211,6 +222,10 @@ func (d *Driver) NodePublishVolume(
 	}
 
 	d.kernelModuleLock.Lock()
+	defer func() {
+		klog.Warning("Releasing kernel module lock!")
+		defer d.kernelModuleLock.Unlock()
+	}()
 	err = d.mounter.MountSensitiveWithoutSystemdWithMountFlags(
 		source,
 		target,
@@ -219,7 +234,7 @@ func (d *Driver) NodePublishVolume(
 		nil,
 		[]string{"--no-mtab"},
 	)
-	d.kernelModuleLock.Unlock()
+	time.Sleep(3 * time.Minute)
 
 	if err != nil {
 		if removeErr := os.Remove(target); removeErr != nil {

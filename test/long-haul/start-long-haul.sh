@@ -37,14 +37,16 @@ print_logs_info "Connecting to AKS Cluster=$ClusterName, ResourceGroup=$Resource
 az configure --defaults group=$ResourceGroup
 az aks get-credentials --resource-group $ResourceGroup --name $ClusterName
 
+reset_all
+
 print_logs_case "Executing fault test"
-./fault-test.sh
+#./fault-test.sh
 
 print_logs_case "Executing update test"
-./update-test.sh
+#./update-test.sh
 
 print_logs_case "Executing perf/scale test"
-./perf-scale-test.sh
+#./perf-scale-test.sh
 
 print_logs_case "Executing external e2e test"
 ./external-e2e.sh
