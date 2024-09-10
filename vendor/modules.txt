@@ -100,7 +100,7 @@ github.com/blang/semver/v4
 # github.com/cespare/xxhash/v2 v2.3.0
 ## explicit; go 1.11
 github.com/cespare/xxhash/v2
-# github.com/container-storage-interface/spec v1.8.0
+# github.com/container-storage-interface/spec v1.9.0
 ## explicit; go 1.18
 github.com/container-storage-interface/spec/lib/go/csi
 # github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
@@ -823,9 +823,6 @@ k8s.io/client-go/util/connrotation
 k8s.io/client-go/util/flowcontrol
 k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/workqueue
-# k8s.io/cloud-provider v0.30.4 => k8s.io/cloud-provider v0.30.4
-## explicit; go 1.22.0
-k8s.io/cloud-provider
 # k8s.io/component-base v0.30.4 => k8s.io/component-base v0.30.4
 ## explicit; go 1.22.0
 k8s.io/component-base/featuregate
@@ -854,7 +851,7 @@ k8s.io/kube-openapi/pkg/schemaconv
 k8s.io/kube-openapi/pkg/spec3
 k8s.io/kube-openapi/pkg/util/proto
 k8s.io/kube-openapi/pkg/validation/spec
-# k8s.io/kubernetes v1.30.4
+# k8s.io/kubernetes v1.31.0
 ## explicit; go 1.22.0
 k8s.io/kubernetes/pkg/features
 k8s.io/kubernetes/pkg/kubelet/server/metrics
@@ -870,7 +867,7 @@ k8s.io/kubernetes/pkg/volume/util/types
 # k8s.io/mount-utils v0.30.4 => k8s.io/mount-utils v0.30.4
 ## explicit; go 1.22.0
 k8s.io/mount-utils
-# k8s.io/utils v0.0.0-20231127182322-b307cd553661
+# k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
 ## explicit; go 1.18
 k8s.io/utils/buffer
 k8s.io/utils/clock
