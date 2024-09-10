@@ -5,9 +5,9 @@ go 1.23.1
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0
 	github.com/Azure/go-autorest/autorest v0.11.29
-	github.com/container-storage-interface/spec v1.8.0
+	github.com/container-storage-interface/spec v1.10.0
 	github.com/kubernetes-csi/csi-lib-utils v0.9.1
-	github.com/kubernetes-csi/csi-test/v5 v5.1.0
+	github.com/kubernetes-csi/csi-test/v5 v5.3.0
 	github.com/pborman/uuid v1.2.1
 	github.com/pelletier/go-toml v1.9.4
 	github.com/stretchr/testify v1.9.0
