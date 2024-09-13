@@ -5,7 +5,7 @@ go 1.23.1
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0
 	github.com/Azure/go-autorest/autorest v0.11.29
-	github.com/container-storage-interface/spec v1.8.0
+	github.com/container-storage-interface/spec v1.9.0
 	github.com/kubernetes-csi/csi-lib-utils v0.9.1
 	github.com/kubernetes-csi/csi-test/v5 v5.1.0
 	github.com/pborman/uuid v1.2.1
@@ -16,9 +16,9 @@ require (
 	google.golang.org/protobuf v1.34.2
 	k8s.io/apimachinery v0.30.4
 	k8s.io/klog/v2 v2.130.1
-	k8s.io/kubernetes v1.30.4
+	k8s.io/kubernetes v1.31.1
 	k8s.io/mount-utils v0.30.4
-	k8s.io/utils v0.0.0-20231127182322-b307cd553661
+	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
 	sigs.k8s.io/cloud-provider-azure v1.30.4
 	sigs.k8s.io/yaml v1.4.0
 )
@@ -95,7 +95,6 @@ require (
 	k8s.io/api v0.30.4 // indirect
 	k8s.io/apiserver v0.30.4 // indirect
 	k8s.io/client-go v0.30.4 // indirect
-	k8s.io/cloud-provider v0.30.4 // indirect
 	k8s.io/component-base v0.30.4 // indirect
 	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
