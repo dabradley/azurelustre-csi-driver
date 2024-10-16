@@ -22,11 +22,11 @@ import (
 	"sort"
 	"testing"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // TODO_JUSJIN: update and add tests
@@ -36,14 +36,11 @@ func TestControllerGetCapabilities(t *testing.T) {
 	d.AddControllerServiceCapabilities(controllerServiceCapabilities)
 	req := csi.ControllerGetCapabilitiesRequest{}
 	resp, err := d.ControllerGetCapabilities(context.Background(), &req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, resp)
-	var capabilitiesSupported []csi.ControllerServiceCapability_RPC_Type
+	capabilitiesSupported := make([]csi.ControllerServiceCapability_RPC_Type, 0, len(resp.GetCapabilities()))
 	for _, capabilitySupported := range resp.GetCapabilities() {
-		capabilitiesSupported = append(
-			capabilitiesSupported,
-			capabilitySupported.GetRpc().Type,
-		)
+		capabilitiesSupported = append(capabilitiesSupported, capabilitySupported.GetRpc().GetType())
 	}
 	sort.Slice(capabilitiesSupported,
 		func(i, j int) bool {
@@ -83,7 +80,7 @@ func TestCreateVolume_Success(t *testing.T) {
 	d := NewFakeDriver()
 	req := buildCreateVolumeRequest()
 	rep, err := d.CreateVolume(context.Background(), req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotEmpty(t, rep.GetVolume())
 	assert.NotEmpty(t, rep.GetVolume().GetVolumeId())
 	assert.NotZero(t, rep.GetVolume().GetCapacityBytes())
@@ -105,8 +102,8 @@ func TestCreateVolume_Success_CapacityRoundUp(t *testing.T) {
 			RequiredBytes: capacityInput,
 		}
 		rep, err := d.CreateVolume(context.Background(), req)
-		assert.NoError(t, err)
-		assert.Equal(t, expectedOutputs[idx], rep.Volume.GetCapacityBytes())
+		require.NoError(t, err)
+		assert.Equal(t, expectedOutputs[idx], rep.GetVolume().GetCapacityBytes())
 	}
 }
 
@@ -115,11 +112,11 @@ func TestCreateVolume_Err_NoName(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	req.Name = ""
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "Name")
+	require.ErrorContains(t, err, "Name")
 }
 
 func TestCreateVolume_Err_NoVolumeCapabilities(t *testing.T) {
@@ -127,11 +124,11 @@ func TestCreateVolume_Err_NoVolumeCapabilities(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	req.VolumeCapabilities = nil
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "Volume capabilities")
+	require.ErrorContains(t, err, "Volume capabilities")
 }
 
 func TestCreateVolume_Err_EmptyVolumeCapabilities(t *testing.T) {
@@ -139,11 +136,11 @@ func TestCreateVolume_Err_EmptyVolumeCapabilities(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	req.VolumeCapabilities = []*csi.VolumeCapability{}
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "Volume capabilities")
+	require.ErrorContains(t, err, "Volume capabilities")
 }
 
 func TestCreateVolume_Err_NoParameters(t *testing.T) {
@@ -151,23 +148,23 @@ func TestCreateVolume_Err_NoParameters(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	req.Parameters = nil
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "Parameters must be provided")
+	require.ErrorContains(t, err, "Parameters must be provided")
 }
 
 func TestCreateVolume_Err_ParametersNoIP(t *testing.T) {
 	d := NewFakeDriver()
 	req := buildCreateVolumeRequest()
-	delete(req.Parameters, VolumeContextMGSIPAddress)
+	delete(req.GetParameters(), VolumeContextMGSIPAddress)
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "mgs-ip-address")
+	require.ErrorContains(t, err, "mgs-ip-address")
 }
 
 func TestCreateVolume_Err_ParametersEmptyIP(t *testing.T) {
@@ -175,35 +172,35 @@ func TestCreateVolume_Err_ParametersEmptyIP(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	req.Parameters[VolumeContextMGSIPAddress] = ""
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "mgs-ip-address")
+	require.ErrorContains(t, err, "mgs-ip-address")
 }
 
 func TestCreateVolume_Err_ParametersNoFSName(t *testing.T) {
 	d := NewFakeDriver()
 	req := buildCreateVolumeRequest()
-	delete(req.Parameters, VolumeContextFSName)
+	delete(req.GetParameters(), VolumeContextFSName)
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "fs-name")
+	require.ErrorContains(t, err, "fs-name")
 }
 
 func TestCreateVolume_Err_ParametersEmptyFSName(t *testing.T) {
 	d := NewFakeDriver()
 	req := buildCreateVolumeRequest()
-	req.Parameters[VolumeContextFSName] = ""
+	req.GetParameters()[VolumeContextFSName] = ""
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "fs-name")
+	require.ErrorContains(t, err, "fs-name")
 }
 
 func TestCreateVolume_Err_ParametersEmptySubDir(t *testing.T) {
@@ -211,11 +208,11 @@ func TestCreateVolume_Err_ParametersEmptySubDir(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	req.Parameters[VolumeContextSubDir] = ""
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "sub-dir")
+	require.ErrorContains(t, err, "sub-dir")
 }
 
 func TestCreateVolume_Err_UnknownParameters(t *testing.T) {
@@ -224,13 +221,13 @@ func TestCreateVolume_Err_UnknownParameters(t *testing.T) {
 	req.Parameters["FirstNonexistentParameter"] = "Invalid"
 	req.Parameters["AnotherNonexistentParameter"] = "Invalid"
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "Invalid parameter")
-	assert.ErrorContains(t, err, "FirstNonexistentParameter")
-	assert.ErrorContains(t, err, "AnotherNonexistentParameter")
+	require.ErrorContains(t, err, "Invalid parameter")
+	require.ErrorContains(t, err, "FirstNonexistentParameter")
+	require.ErrorContains(t, err, "AnotherNonexistentParameter")
 }
 
 func TestCreateVolume_Err_HasVolumeContentSource(t *testing.T) {
@@ -238,11 +235,11 @@ func TestCreateVolume_Err_HasVolumeContentSource(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	req.VolumeContentSource = &csi.VolumeContentSource{}
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "existing volume")
+	require.ErrorContains(t, err, "existing volume")
 }
 
 func TestCreateVolume_Err_HasSecrets(t *testing.T) {
@@ -250,11 +247,11 @@ func TestCreateVolume_Err_HasSecrets(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	req.Secrets = map[string]string{}
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "secrets")
+	require.ErrorContains(t, err, "secrets")
 }
 
 func TestCreateVolume_Err_HasSecretsValue(t *testing.T) {
@@ -262,11 +259,11 @@ func TestCreateVolume_Err_HasSecretsValue(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	req.Secrets = map[string]string{"test": "test"}
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "secrets")
+	require.ErrorContains(t, err, "secrets")
 }
 
 func TestCreateVolume_Err_HasAccessibilityRequirements(t *testing.T) {
@@ -274,11 +271,11 @@ func TestCreateVolume_Err_HasAccessibilityRequirements(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	req.AccessibilityRequirements = &csi.TopologyRequirement{}
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "accessibility_requirements")
+	require.ErrorContains(t, err, "accessibility_requirements")
 }
 
 func TestCreateVolume_Err_BlockVolume(t *testing.T) {
@@ -295,11 +292,11 @@ func TestCreateVolume_Err_BlockVolume(t *testing.T) {
 		},
 	}
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "block volume")
+	require.ErrorContains(t, err, "block volume")
 }
 
 func TestCreateVolume_Err_BlockMountVolume(t *testing.T) {
@@ -315,11 +312,11 @@ func TestCreateVolume_Err_BlockMountVolume(t *testing.T) {
 			},
 		})
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "block volume")
+	require.ErrorContains(t, err, "block volume")
 }
 
 func TestCreateVolume_Err_NotSupportedAccessMode(t *testing.T) {
@@ -356,11 +353,11 @@ func TestCreateVolume_Err_NotSupportedAccessMode(t *testing.T) {
 			)
 		}
 		_, err := d.CreateVolume(context.Background(), req)
-		assert.Error(t, err)
+		require.Error(t, err)
 		grpcStatus, ok := status.FromError(err)
 		assert.True(t, ok)
 		assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-		assert.ErrorContains(t, err, capabilitiesNotSupported[0].String())
+		require.ErrorContains(t, err, capabilitiesNotSupported[0].String())
 	} else {
 		t.Log("No unsupported AccessMode.")
 		assert.True(t, true)
@@ -374,7 +371,7 @@ func TestCreateVolume_Err_OperationExists(t *testing.T) {
 		assert.Fail(t, "Can't acquire volume lock")
 	}
 	_, err := d.CreateVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.Aborted, grpcStatus.Code())
@@ -388,7 +385,7 @@ func TestDeleteVolume_Success(t *testing.T) {
 			"testVolume", "testFs", "127.0.0.1", "testSubDir"),
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }
 
 func TestDeleteVolume_Err_NoVolumeID(t *testing.T) {
@@ -397,11 +394,11 @@ func TestDeleteVolume_Err_NoVolumeID(t *testing.T) {
 		VolumeId: "",
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "Volume ID")
+	require.ErrorContains(t, err, "Volume ID")
 }
 
 func TestDeleteVolume_Err_HasSecrets(t *testing.T) {
@@ -412,11 +409,11 @@ func TestDeleteVolume_Err_HasSecrets(t *testing.T) {
 		Secrets: map[string]string{},
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "secrets")
+	require.ErrorContains(t, err, "secrets")
 }
 
 func TestDeleteVolume_Err_HasSecretsValue(t *testing.T) {
@@ -429,11 +426,11 @@ func TestDeleteVolume_Err_HasSecretsValue(t *testing.T) {
 		},
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "secrets")
+	require.ErrorContains(t, err, "secrets")
 }
 
 func TestDeleteVolume_Err_OperationExists(t *testing.T) {
@@ -446,7 +443,7 @@ func TestDeleteVolume_Err_OperationExists(t *testing.T) {
 		assert.Fail(t, "Can't acquire volume lock")
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.Aborted, grpcStatus.Code())
@@ -474,7 +471,7 @@ func TestValidateVolumeCapabilities_Success(t *testing.T) {
 	}
 
 	_, err := d.ValidateVolumeCapabilities(context.Background(), req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }
 
 func TestValidateVolumeCapabilities_Err_NoVolumeID(t *testing.T) {
@@ -497,11 +494,11 @@ func TestValidateVolumeCapabilities_Err_NoVolumeID(t *testing.T) {
 	}
 
 	_, err := d.ValidateVolumeCapabilities(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "Volume ID")
+	require.ErrorContains(t, err, "Volume ID")
 }
 
 func TestValidateVolumeCapabilities_Err_NoVolumeCapabilities(t *testing.T) {
@@ -513,11 +510,11 @@ func TestValidateVolumeCapabilities_Err_NoVolumeCapabilities(t *testing.T) {
 	}
 
 	_, err := d.ValidateVolumeCapabilities(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "capabilities")
+	require.ErrorContains(t, err, "capabilities")
 }
 
 func TestValidateVolumeCapabilities_Err_EmptyVolumeCapabilities(t *testing.T) {
@@ -529,11 +526,11 @@ func TestValidateVolumeCapabilities_Err_EmptyVolumeCapabilities(t *testing.T) {
 	}
 
 	_, err := d.ValidateVolumeCapabilities(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "capabilities")
+	require.ErrorContains(t, err, "capabilities")
 }
 
 func TestValidateVolumeCapabilities_Err_HasSecretes(t *testing.T) {
@@ -558,11 +555,11 @@ func TestValidateVolumeCapabilities_Err_HasSecretes(t *testing.T) {
 	}
 
 	_, err := d.ValidateVolumeCapabilities(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "secrets")
+	require.ErrorContains(t, err, "secrets")
 }
 
 func TestValidateVolumeCapabilities_Err_HasSecretesValue(t *testing.T) {
@@ -587,11 +584,11 @@ func TestValidateVolumeCapabilities_Err_HasSecretesValue(t *testing.T) {
 	}
 
 	_, err := d.ValidateVolumeCapabilities(context.Background(), req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	assert.ErrorContains(t, err, "secrets")
+	require.ErrorContains(t, err, "secrets")
 }
 
 func TestValidateVolumeCapabilities_Success_BlockCapabilities(t *testing.T) {
@@ -617,7 +614,7 @@ func TestValidateVolumeCapabilities_Success_BlockCapabilities(t *testing.T) {
 	}
 
 	res, err := d.ValidateVolumeCapabilities(context.Background(), req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Nil(t, res.GetConfirmed())
 }
 
@@ -662,7 +659,7 @@ func TestValidateVolumeCapabilities_Success_HasUnsupportedAccessMode(
 		}
 
 		res, err := d.ValidateVolumeCapabilities(context.Background(), req)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Nil(t, res.GetConfirmed())
 	} else {
 		t.Log("No unsupported AccessMode.")
