@@ -19,10 +19,12 @@ package azurelustre
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storagecache/armstoragecache/v4"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"k8s.io/klog/v2"
@@ -156,7 +158,7 @@ func NewDriver(options *DriverOptions) *Driver {
 
 	ctx := context.Background()
 
-	// Will need to chang if we ever support non-AKS clusters
+	// Will need to change if we ever support non-AKS clusters
 	AKSConfigFile := "/etc/kubernetes/azure.json"
 
 	az := &azure.Cloud{}
@@ -180,9 +182,12 @@ func NewDriver(options *DriverOptions) *Driver {
 		// if tenantID := os.Getenv("AZURE_TENANT_ID"); tenantID != "" {
 		// 	config.TenantID = tenantID
 		// }
-		// if clientID := os.Getenv("AZURE_CLIENT_ID"); clientID != "" {
-		// 	config.AADClientID = clientID
-		// }
+		if clientID := os.Getenv("AZURE_CLIENT_ID"); clientID != "" {
+			config.AADClientID = clientID
+		} else if config.UseManagedIdentityExtension && config.UserAssignedIdentityID != "" {
+			os.Setenv("AZURE_CLIENT_ID", config.UserAssignedIdentityID)
+			config.AADClientID = config.UserAssignedIdentityID
+		}
 		// if federatedTokenFile := os.Getenv("AZURE_FEDERATED_TOKEN_FILE"); federatedTokenFile != "" {
 		// 	config.AADFederatedTokenFile = federatedTokenFile
 		// 	config.UseFederatedWorkloadIdentityExtension = true
@@ -193,17 +198,32 @@ func NewDriver(options *DriverOptions) *Driver {
 		d.cloud = az
 		d.resourceGroup = config.ResourceGroup
 		d.location = config.Location
+
 		cred, err := azidentity.NewDefaultAzureCredential(nil)
 		if err != nil {
-			klog.V(2).Infof("failed to obtain a credential: %v", err)
+			klog.Warningf("failed to obtain a credential: %v", err)
 		}
-		klog.V(2).Infof("CREDENTIAL: %v", cred)
-		clientFactory, err := armstoragecache.NewClientFactory(config.SubscriptionID, cred, nil)
+		klog.V(2).Infof("CREDENTIAL: %#v", cred)
+		storageClientFactory, err := armstoragecache.NewClientFactory(config.SubscriptionID, cred, nil)
 		if err != nil {
-			klog.V(2).Infof("failed to create client factory: %v", err)
+			klog.Warningf("failed to create storage client factory: %v", err)
 		}
-		amlFilesystemsClient := clientFactory.NewAmlFilesystemsClient()
-		d.dynamicProvisioner = &DynamicProvisioner{amlFilesystemsClient: amlFilesystemsClient}
+		subsID := d.cloud.SubscriptionID
+		if len(d.cloud.NetworkResourceSubscriptionID) > 0 {
+			subsID = d.cloud.NetworkResourceSubscriptionID
+		}
+		networkClientFactory, err := armnetwork.NewClientFactory(subsID, cred, nil)
+		if err != nil {
+			klog.Warningf("failed to create network client factory: %v", err)
+		}
+		vnetClient := networkClientFactory.NewVirtualNetworksClient()
+		mgmtClient := storageClientFactory.NewManagementClient()
+		amlFilesystemsClient := storageClientFactory.NewAmlFilesystemsClient()
+		d.dynamicProvisioner = &DynamicProvisioner{
+			amlFilesystemsClient: amlFilesystemsClient,
+			mgmtClient:           mgmtClient,
+			vnetClient:           vnetClient,
+		}
 	}
 
 	klog.V(2).Infof("config: %#v", config)
@@ -212,28 +232,32 @@ func NewDriver(options *DriverOptions) *Driver {
 	return &d
 }
 
-// getSubnetResourceID get default subnet resource ID from cloud provider config
-func (d *Driver) getSubnetResourceID(vnetResourceGroup, vnetName, subnetName string) string {
+func (d *Driver) populateSubnetPropertiesFromCloudConfig(subnetInfo SubnetProperties) SubnetProperties {
+	subnetProperties := subnetInfo
 	subsID := d.cloud.SubscriptionID
 	if len(d.cloud.NetworkResourceSubscriptionID) > 0 {
 		subsID = d.cloud.NetworkResourceSubscriptionID
 	}
 
-	if len(vnetResourceGroup) == 0 {
-		vnetResourceGroup = d.cloud.ResourceGroup
+	if len(subnetInfo.VnetResourceGroup) == 0 {
+		subnetProperties.VnetResourceGroup = d.cloud.ResourceGroup
 		if len(d.cloud.VnetResourceGroup) > 0 {
-			vnetResourceGroup = d.cloud.VnetResourceGroup
+			subnetProperties.VnetResourceGroup = d.cloud.VnetResourceGroup
 		}
 	}
 
-	if len(vnetName) == 0 {
-		vnetName = d.cloud.VnetName
+	if len(subnetInfo.VnetName) == 0 {
+		subnetProperties.VnetName = d.cloud.VnetName
 	}
 
-	if len(subnetName) == 0 {
-		subnetName = d.cloud.SubnetName
+	if len(subnetInfo.SubnetName) == 0 {
+		subnetProperties.SubnetName = d.cloud.SubnetName
 	}
-	return fmt.Sprintf(subnetTemplate, subsID, vnetResourceGroup, vnetName, subnetName)
+	subnetID := fmt.Sprintf(subnetTemplate, subsID, subnetProperties.VnetResourceGroup, subnetProperties.VnetName, subnetProperties.SubnetName)
+
+	subnetProperties.SubnetID = subnetID
+
+	return subnetProperties
 }
 
 // Run driver initialization

@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storagecache/armstoragecache/v4"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -139,19 +140,21 @@ func TestDynamicCreateVolume_Success(t *testing.T) {
 func TestDynamicCreateVolume_Success_SendsCorrectProperties(t *testing.T) {
 	expectedAmlfsProperties := &AmlFilesystemProperties{
 		ResourceGroupName:    "test-resource-group",
-		AmlFilesystemName:    "test-filesystem",
+		AmlFilesystemName:    "test_volume-test-filesystem",
 		Location:             "test-location",
-		VnetResourceGroup:    "test-vnet-rg",
-		VnetName:             "test-vnet-name",
-		SubnetName:           "test-subnet-name",
 		MaintenanceDayOfWeek: "Monday",
 		TimeOfDayUTC:         "12:00",
 		SKUName:              "AMLFS-Durable-Premium-250",
-		SubnetID:             "/subscriptions/subscription/resourceGroups/test-vnet-rg/providers/Microsoft.Network/virtualNetworks/test-vnet-name/subnets/test-subnet-name",
 		StorageCapacityTiB:   8,
 		Identities:           []string{"identity1", "identity2"},
 		Tags:                 map[string]string{"key1": "value1", "key2": "value2"},
 		Zones:                []string{"zone1", "zone2"},
+		SubnetInfo: SubnetProperties{
+			VnetResourceGroup: "test-vnet-rg",
+			VnetName:          "test-vnet-name",
+			SubnetName:        "test-subnet-name",
+			SubnetID:          "/subscriptions/subscription/resourceGroups/test-vnet-rg/providers/Microsoft.Network/virtualNetworks/test-vnet-name/subnets/test-subnet-name",
+		},
 	}
 
 	d := NewFakeDriver()
@@ -222,16 +225,16 @@ func TestDynamicCreateVolume_Success_NameMapping(t *testing.T) {
 	pvcNamespace := "pvc_namespace"
 	pvName := "pv_name"
 	nameInputs := []string{
-		// "test-filesystem",
+		"test-filesystem",
 		"test-filesystem-${pvc.metadata.name}",
 		"test-filesystem-${pvc.metadata.namespace}",
 		"test-filesystem-${pv.metadata.name}",
 	}
 	expectedOutputs := []string{
-		// "test-filesystem",
-		"test-filesystem-" + pvcName,
-		"test-filesystem-" + pvcNamespace,
-		"test-filesystem-" + pvName,
+		"test_volume-test-filesystem",
+		"test_volume-test-filesystem-" + pvcName,
+		"test_volume-test-filesystem-" + pvcNamespace,
+		"test_volume-test-filesystem-" + pvName,
 	}
 	d := NewFakeDriver()
 	ctrl := gomock.NewController(t)
@@ -254,6 +257,9 @@ func TestDynamicCreateVolume_Success_NameMapping(t *testing.T) {
 }
 
 func TestCreateVolume_Success_CapacityRoundUp(t *testing.T) {
+	testDescriptions := []string{
+		"round 0 to default size", "round block size - 1 to next block size", "remains at exact block size", "round block size + 1 to next block size",
+	}
 	capacityInputs := []int64{
 		0, laaSOBlockSizeInBytes - 1, laaSOBlockSizeInBytes, laaSOBlockSizeInBytes + 1,
 	}
@@ -264,12 +270,14 @@ func TestCreateVolume_Success_CapacityRoundUp(t *testing.T) {
 	d := NewFakeDriver()
 	req := buildCreateVolumeRequest()
 	for idx, capacityInput := range capacityInputs {
-		req.CapacityRange = &csi.CapacityRange{
-			RequiredBytes: capacityInput,
-		}
-		rep, err := d.CreateVolume(context.Background(), req)
-		require.NoError(t, err)
-		assert.Equal(t, expectedOutputs[idx], rep.GetVolume().GetCapacityBytes())
+		t.Run(testDescriptions[idx], func(t *testing.T) {
+			req.CapacityRange = &csi.CapacityRange{
+				RequiredBytes: capacityInput,
+			}
+			rep, err := d.CreateVolume(context.Background(), req)
+			require.NoError(t, err)
+			assert.Equal(t, expectedOutputs[idx], rep.GetVolume().GetCapacityBytes())
+		})
 	}
 }
 
@@ -282,14 +290,35 @@ func TestDynamicCreateVolume_Err_CreateError(t *testing.T) {
 	defer ctrl.Finish()
 	d.cloud = azure.GetTestCloud(ctrl)
 	req := buildDynamicProvCreateVolumeRequest()
-	req.Parameters["amlfilesystem-name"] = "testShouldFail"
+	req.Parameters["amlfilesystem-name"] = clusterRequestFailureName
 	_, err := d.CreateVolume(context.Background(), req)
 	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
-	assert.Equal(t, codes.Unknown, grpcStatus.Code())
-	require.ErrorContains(t, err, "Error when creating AMLFS")
-	require.ErrorContains(t, err, "testShouldFail")
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "error when creating AMLFS")
+	require.ErrorContains(t, err, clusterRequestFailureName)
+}
+
+func TestDynamicCreateVolume_Err_VolNameTooLong(t *testing.T) {
+	d := NewFakeDriver()
+	fakeDynamicProvisioner := &FakeDynamicProvisioner{}
+	d.dynamicProvisioner = fakeDynamicProvisioner
+
+	tooLongName := strings.Repeat("a", 81)
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	d.cloud = azure.GetTestCloud(ctrl)
+	req := buildDynamicProvCreateVolumeRequest()
+	req.Name = tooLongName
+	_, err := d.CreateVolume(context.Background(), req)
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "invalid volume name")
+	require.ErrorContains(t, err, tooLongName)
 }
 
 func TestCreateVolume_Err_NoName(t *testing.T) {
@@ -404,30 +433,6 @@ func TestCreateVolume_Err_CapacityAboveLimit(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
 	require.ErrorContains(t, err, "greater than capacity limit")
 }
-
-// func TestCreateVolume_Err_ParametersNoIP(t *testing.T) {
-// 	d := NewFakeDriver()
-// 	req := buildCreateVolumeRequest()
-// 	delete(req.GetParameters(), VolumeContextMGSIPAddress)
-// 	_, err := d.CreateVolume(context.Background(), req)
-// 	require.Error(t, err)
-// 	grpcStatus, ok := status.FromError(err)
-// 	assert.True(t, ok)
-// 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-// 	require.ErrorContains(t, err, "mgs-ip-address")
-// }
-
-// func TestCreateVolume_Err_ParametersEmptyIP(t *testing.T) {
-// 	d := NewFakeDriver()
-// 	req := buildCreateVolumeRequest()
-// 	req.Parameters[VolumeContextMGSIPAddress] = ""
-// 	_, err := d.CreateVolume(context.Background(), req)
-// 	require.Error(t, err)
-// 	grpcStatus, ok := status.FromError(err)
-// 	assert.True(t, ok)
-// 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-// 	require.ErrorContains(t, err, "mgs-ip-address")
-// }
 
 func TestCreateVolume_Err_ParametersNoFSName(t *testing.T) {
 	d := NewFakeDriver()
@@ -667,10 +672,9 @@ func TestDynamicDeleteVolume_Success(t *testing.T) {
 	assert.NotEmpty(t, rep.GetVolume().GetVolumeId())
 	require.NotEmpty(t, fakeDynamicProvisioner.Filesystems)
 
-	// d = NewFakeDriver()
 	deleteRequest := &csi.DeleteVolumeRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"testVolume", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"testVolume", "testFs", "127.0.0.1", "testSubDir", "test_volume-test-filesystem", "testResourceGroupName"),
 	}
 	_, err = d.DeleteVolume(context.Background(), deleteRequest)
 	require.NoError(t, err)
@@ -687,15 +691,15 @@ func TestDynamicDeleteVolume_Err_DeleteError(t *testing.T) {
 	d.cloud = azure.GetTestCloud(ctrl)
 	req := &csi.DeleteVolumeRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"testVolume", "testFs", "127.0.0.1", "testSubDir", "testShouldFail", "testResourceGroupName"),
+			"testVolume", "testFs", "127.0.0.1", "testSubDir", clusterRequestFailureName, "testResourceGroupName"),
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
 	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
-	assert.Equal(t, codes.Unknown, grpcStatus.Code())
-	require.ErrorContains(t, err, "Error when deleting AMLFS")
-	require.ErrorContains(t, err, "testShouldFail")
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "error when deleting AMLFS")
+	require.ErrorContains(t, err, clusterRequestFailureName)
 }
 
 func TestDeleteVolume_Err_NoVolumeID(t *testing.T) {
@@ -986,8 +990,7 @@ func TestValidateVolumeCapabilities_Success_HasUnsupportedAccessMode(
 
 func TestParseAmlfilesystemProperties_Success(t *testing.T) {
 	properties := map[string]string{
-		// "subscription-id":         "test-subscription-id",
-		// "resource-group-name":     "test-resource-group",
+		"resource-group-name":     "test-resource-group",
 		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
@@ -999,23 +1002,33 @@ func TestParseAmlfilesystemProperties_Success(t *testing.T) {
 		"identities":              "identity1,identity2",
 		"tags":                    "key1=value1,key2=value2",
 		"zones":                   "zone1,zone2,",
+		"root-squash-mode":        "RootOnly",
+		"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
+		"root-squash-uid":         "1000",
+		"root-squash-gid":         "2000",
 	}
 
 	expected := &AmlFilesystemProperties{
-		// SubscriptionID:       "test-subscription-id",
-		// ResourceGroupName:    "test-resource-group",
+		ResourceGroupName:    "test-resource-group",
 		AmlFilesystemName:    "test-filesystem",
 		Location:             "test-location",
-		VnetResourceGroup:    "test-vnet-rg",
-		VnetName:             "test-vnet-name",
-		SubnetName:           "test-subnet-name",
 		MaintenanceDayOfWeek: "Monday",
 		TimeOfDayUTC:         "12:00",
-		// StorageCapacityTiB:   10,
-		SKUName:    "Standard",
-		Identities: []string{"identity1", "identity2"},
-		Tags:       map[string]string{"key1": "value1", "key2": "value2"},
-		Zones:      []string{"zone1", "zone2"},
+		SKUName:              "Standard",
+		Identities:           []string{"identity1", "identity2"},
+		Tags:                 map[string]string{"key1": "value1", "key2": "value2"},
+		Zones:                []string{"zone1", "zone2"},
+		SubnetInfo: SubnetProperties{
+			VnetResourceGroup: "test-vnet-rg",
+			VnetName:          "test-vnet-name",
+			SubnetName:        "test-subnet-name",
+		},
+		RootSquashSettings: &RootSquashSettings{
+			SquashMode:       armstoragecache.AmlFilesystemSquashModeRootOnly,
+			NoSquashNidLists: "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
+			SquashUID:        1000,
+			SquashGID:        2000,
+		},
 	}
 
 	result, err := parseAmlFilesystemProperties(properties)
@@ -1025,8 +1038,8 @@ func TestParseAmlfilesystemProperties_Success(t *testing.T) {
 
 func TestParseAmlfilesystemProperties_Err_InvalidParameters(t *testing.T) {
 	properties := map[string]string{
-		"invalid-param": "invalid",
-		// "resource-group-name":     "test-resource-group",
+		"invalid-param":           "invalid",
+		"resource-group-name":     "test-resource-group",
 		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
@@ -1047,61 +1060,194 @@ func TestParseAmlfilesystemProperties_Err_InvalidParameters(t *testing.T) {
 	require.ErrorContains(t, err, "invalid-param")
 }
 
-// func TestParseAmlfilesystemProperties_Err_MissingSubscriptionId(t *testing.T) {
-// 	properties := map[string]string{
-// 		"resource-group-name":     "test-resource-group",
-// 		"amlfilesystem-name":      "test-filesystem",
-// 		"location":                "test-location",
-// 		"filesystem-subnet-id":    "test-subnet-id",
-// 		"maintenance-day-of-week": "Monday",
-// 		"time-of-day-utc":         "12:00",
-// 		"storage-capacity-tib":    "10",
-// 		"sku-name":                "Standard",
-// 		"zones":                   "zone1,zone2",
-// 	}
+func TestParseAmlfilesystemProperties_Err_EmptyRootSquashMode(t *testing.T) {
+	properties := map[string]string{
+		"resource-group-name":     "test-resource-group",
+		"amlfilesystem-name":      "test-filesystem",
+		"location":                "test-location",
+		"vnet-resource-group":     "test-vnet-rg",
+		"vnet-name":               "test-vnet-name",
+		"subnet-name":             "test-subnet-name",
+		"maintenance-day-of-week": "Monday",
+		"time-of-day-utc":         "12:00",
+		"sku-name":                "Standard",
+		"zones":                   "zone1,zone2",
+		"root-squash-mode":        "",
+		"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
+		"root-squash-uid":         "1000",
+		"root-squash-gid":         "2000",
+	}
 
-// 	_, err := parseAmlFilesystemProperties(properties)
-// 	require.Error(t, err)
-// 	grpcStatus, ok := status.FromError(err)
-// 	assert.True(t, ok)
-// 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-// 	require.ErrorContains(t, err, "subscription-id must be provided")
-// }
+	_, err := parseAmlFilesystemProperties(properties)
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "root-squash-mode must be one of")
+}
 
-// func TestParseAmlfilesystemProperties_Err_MissingRsourceGroupName(t *testing.T) {
-// 	properties := map[string]string{
-// 		// "subscription-id":         "test-subscription-id",
-// 		"amlfilesystem-name":      "test-filesystem",
-// 		"location":                "test-location",
-// 		"filesystem-subnet-id":    "test-subnet-id",
-// 		"maintenance-day-of-week": "Monday",
-// 		"time-of-day-utc":         "12:00",
-// 		// "storage-capacity-tib":    "10",
-// 		"sku-name": "Standard",
-// 		"zones":    "zone1,zone2",
-// 	}
+func TestParseAmlfilesystemProperties_Err_InvalidRootSquashMode(t *testing.T) {
+	properties := map[string]string{
+		"resource-group-name":     "test-resource-group",
+		"amlfilesystem-name":      "test-filesystem",
+		"location":                "test-location",
+		"vnet-resource-group":     "test-vnet-rg",
+		"vnet-name":               "test-vnet-name",
+		"subnet-name":             "test-subnet-name",
+		"maintenance-day-of-week": "Monday",
+		"time-of-day-utc":         "12:00",
+		"sku-name":                "Standard",
+		"zones":                   "zone1,zone2",
+		"root-squash-mode":        "invalidMode",
+		"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
+		"root-squash-uid":         "1000",
+		"root-squash-gid":         "2000",
+	}
 
-// 	_, err := parseAmlFilesystemProperties(properties)
-// 	require.Error(t, err)
-// 	grpcStatus, ok := status.FromError(err)
-// 	assert.True(t, ok)
-// 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-// 	require.ErrorContains(t, err, "resource-group-name must be provided")
-// }
+	_, err := parseAmlFilesystemProperties(properties)
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "root-squash-mode must be one of")
+}
+
+func TestParseAmlfilesystemProperties_Err_InvalidRootSquashNidLists(t *testing.T) {
+	properties := map[string]string{
+		"resource-group-name":     "test-resource-group",
+		"amlfilesystem-name":      "test-filesystem",
+		"location":                "test-location",
+		"vnet-resource-group":     "test-vnet-rg",
+		"vnet-name":               "test-vnet-name",
+		"subnet-name":             "test-subnet-name",
+		"maintenance-day-of-week": "Monday",
+		"time-of-day-utc":         "12:00",
+		"sku-name":                "Standard",
+		"zones":                   "zone1,zone2",
+		"root-squash-mode":        "RootOnly",
+		"root-squash-nid-lists":   "invalidIPs",
+		"root-squash-uid":         "1000",
+		"root-squash-gid":         "2000",
+	}
+
+	_, err := parseAmlFilesystemProperties(properties)
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "root-squash-nid-lists must be in the form")
+}
+
+func TestParseAmlfilesystemProperties_Err_InvalidRootSquashUid(t *testing.T) {
+	properties := map[string]string{
+		"resource-group-name":     "test-resource-group",
+		"amlfilesystem-name":      "test-filesystem",
+		"location":                "test-location",
+		"vnet-resource-group":     "test-vnet-rg",
+		"vnet-name":               "test-vnet-name",
+		"subnet-name":             "test-subnet-name",
+		"maintenance-day-of-week": "Monday",
+		"time-of-day-utc":         "12:00",
+		"sku-name":                "Standard",
+		"zones":                   "zone1,zone2",
+		"root-squash-mode":        "RootOnly",
+		"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
+		"root-squash-uid":         "0",
+		"root-squash-gid":         "2000",
+	}
+
+	_, err := parseAmlFilesystemProperties(properties)
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "root-squash-uid value must be number between 1 and 4294967295")
+}
+
+func TestParseAmlfilesystemProperties_Err_InvalidRootSquashGid(t *testing.T) {
+	properties := map[string]string{
+		"resource-group-name":     "test-resource-group",
+		"amlfilesystem-name":      "test-filesystem",
+		"location":                "test-location",
+		"vnet-resource-group":     "test-vnet-rg",
+		"vnet-name":               "test-vnet-name",
+		"subnet-name":             "test-subnet-name",
+		"maintenance-day-of-week": "Monday",
+		"time-of-day-utc":         "12:00",
+		"sku-name":                "Standard",
+		"zones":                   "zone1,zone2",
+		"root-squash-mode":        "RootOnly",
+		"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
+		"root-squash-uid":         "1000",
+		"root-squash-gid":         "a",
+	}
+
+	_, err := parseAmlFilesystemProperties(properties)
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "root-squash-gid value must be number between 1 and 4294967295")
+}
+
+func TestParseAmlfilesystemProperties_Err_MissingRootSquashProperties(t *testing.T) {
+	rootSquashModes := []string{
+		string(armstoragecache.AmlFilesystemSquashModeNone),
+		string(armstoragecache.AmlFilesystemSquashModeRootOnly),
+		string(armstoragecache.AmlFilesystemSquashModeAll),
+	}
+	missingProperties := []string{"root-squash-nid-lists", "root-squash-uid", "root-squash-gid"}
+	expectedErr := []bool{false, true, true}
+
+	for idx, rootSquashMode := range rootSquashModes {
+		for _, missingProperty := range missingProperties {
+			t.Run(rootSquashMode+"-"+missingProperty, func(t *testing.T) {
+				properties := map[string]string{
+					"resource-group-name":     "test-resource-group",
+					"amlfilesystem-name":      "test-filesystem",
+					"location":                "test-location",
+					"vnet-resource-group":     "test-vnet-rg",
+					"vnet-name":               "test-vnet-name",
+					"subnet-name":             "test-subnet-name",
+					"maintenance-day-of-week": "Monday",
+					"time-of-day-utc":         "12:00",
+					"sku-name":                "Standard",
+					"zones":                   "zone1,zone2",
+					"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
+					"root-squash-uid":         "1000",
+					"root-squash-gid":         "2000",
+				}
+
+				properties["root-squash-mode"] = rootSquashMode
+				delete(properties, missingProperty)
+
+				_, err := parseAmlFilesystemProperties(properties)
+				if expectedErr[idx] {
+					require.Error(t, err)
+					grpcStatus, ok := status.FromError(err)
+					assert.True(t, ok)
+					assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+					require.ErrorContains(t, err, "invalid root squash info")
+					require.ErrorContains(t, err, missingProperty)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
 
 func TestParseAmlfilesystemProperties_Err_MissingMaintenanceDayOfWeek(t *testing.T) {
 	properties := map[string]string{
-		// "subscription-id":      "test-subscription-id",
-		// "resource-group-name":  "test-resource-group",
+		"resource-group-name": "test-resource-group",
 		"amlfilesystem-name":  "test-filesystem",
 		"location":            "test-location",
 		"vnet-resource-group": "test-vnet-rg",
 		"vnet-name":           "test-vnet-name",
 		"subnet-name":         "test-subnet-name",
 		"time-of-day-utc":     "12:00",
-		// "storage-capacity-tib": "10",
-		"sku-name": "Standard",
-		"zones":    "zone1,zone2",
+		"sku-name":            "Standard",
+		"zones":               "zone1,zone2",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1114,8 +1260,7 @@ func TestParseAmlfilesystemProperties_Err_MissingMaintenanceDayOfWeek(t *testing
 
 func TestParseAmlfilesystemProperties_Err_EmptyMaintenanceDayOfWeek(t *testing.T) {
 	properties := map[string]string{
-		// "subscription-id":      "test-subscription-id",
-		// "resource-group-name":  "test-resource-group",
+		"resource-group-name":     "test-resource-group",
 		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
@@ -1123,9 +1268,8 @@ func TestParseAmlfilesystemProperties_Err_EmptyMaintenanceDayOfWeek(t *testing.T
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "",
 		"time-of-day-utc":         "12:00",
-		// "storage-capacity-tib": "10",
-		"sku-name": "Standard",
-		"zones":    "zone1,zone2",
+		"sku-name":                "Standard",
+		"zones":                   "zone1,zone2",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1138,8 +1282,7 @@ func TestParseAmlfilesystemProperties_Err_EmptyMaintenanceDayOfWeek(t *testing.T
 
 func TestParseAmlfilesystemProperties_Err_InvalidMaintenanceDayOfWeek(t *testing.T) {
 	properties := map[string]string{
-		// "subscription-id":      "test-subscription-id",
-		// "resource-group-name":  "test-resource-group",
+		"resource-group-name":     "test-resource-group",
 		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
@@ -1147,9 +1290,8 @@ func TestParseAmlfilesystemProperties_Err_InvalidMaintenanceDayOfWeek(t *testing
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "invalid-day-of-week",
 		"time-of-day-utc":         "12:00",
-		// "storage-capacity-tib": "10",
-		"sku-name": "Standard",
-		"zones":    "zone1,zone2",
+		"sku-name":                "Standard",
+		"zones":                   "zone1,zone2",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1162,17 +1304,15 @@ func TestParseAmlfilesystemProperties_Err_InvalidMaintenanceDayOfWeek(t *testing
 
 func TestParseAmlfilesystemProperties_Err_MissingTimeOfDay(t *testing.T) {
 	properties := map[string]string{
-		// "subscription-id":      "test-subscription-id",
-		// "resource-group-name":  "test-resource-group",
+		"resource-group-name":     "test-resource-group",
 		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
 		"vnet-name":               "test-vnet-name",
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
-		// "storage-capacity-tib": "10",
-		"sku-name": "Standard",
-		"zones":    "zone1,zone2",
+		"sku-name":                "Standard",
+		"zones":                   "zone1,zone2",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1185,8 +1325,7 @@ func TestParseAmlfilesystemProperties_Err_MissingTimeOfDay(t *testing.T) {
 
 func TestParseAmlfilesystemProperties_Err_InvalidTimeOfDay(t *testing.T) {
 	properties := map[string]string{
-		// "subscription-id":      "test-subscription-id",
-		// "resource-group-name":  "test-resource-group",
+		"resource-group-name":     "test-resource-group",
 		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
@@ -1194,9 +1333,8 @@ func TestParseAmlfilesystemProperties_Err_InvalidTimeOfDay(t *testing.T) {
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "11",
-		// "storage-capacity-tib": "10",
-		"sku-name": "Standard",
-		"zones":    "zone1,zone2",
+		"sku-name":                "Standard",
+		"zones":                   "zone1,zone2",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1209,8 +1347,7 @@ func TestParseAmlfilesystemProperties_Err_InvalidTimeOfDay(t *testing.T) {
 
 func TestParseAmlfilesystemProperties_Err_MissingZones(t *testing.T) {
 	properties := map[string]string{
-		// "subscription-id":         "test-subscription-id",
-		// "resource-group-name":     "test-resource-group",
+		"resource-group-name":     "test-resource-group",
 		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
@@ -1218,8 +1355,7 @@ func TestParseAmlfilesystemProperties_Err_MissingZones(t *testing.T) {
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "12:00",
-		// "storage-capacity-tib":    "10",
-		"sku-name": "Standard",
+		"sku-name":                "Standard",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1232,8 +1368,7 @@ func TestParseAmlfilesystemProperties_Err_MissingZones(t *testing.T) {
 
 func TestParseAmlfilesystemProperties_Err_InvalidTags(t *testing.T) {
 	properties := map[string]string{
-		// "subscription-id":      "test-subscription-id",
-		// "resource-group-name":  "test-resource-group",
+		"resource-group-name":     "test-resource-group",
 		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
@@ -1241,10 +1376,9 @@ func TestParseAmlfilesystemProperties_Err_InvalidTags(t *testing.T) {
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "12:00",
-		// "storage-capacity-tib": "10",
-		"sku-name": "Standard",
-		"zones":    "zone1,zone2",
-		"tags":     "key1:value1,=value2",
+		"sku-name":                "Standard",
+		"zones":                   "zone1,zone2",
+		"tags":                    "key1:value1,=value2",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1255,7 +1389,7 @@ func TestParseAmlfilesystemProperties_Err_InvalidTags(t *testing.T) {
 	require.ErrorContains(t, err, "are invalid, the format should be: 'key1=value1,key2=value2")
 }
 
-func TestGetValidAmlFilesystemName(t *testing.T) {
+func TestValidateAndPrependVolumeName(t *testing.T) {
 	tests := []struct {
 		desc              string
 		amlFilesystemName string
@@ -1266,67 +1400,55 @@ func TestGetValidAmlFilesystemName(t *testing.T) {
 			desc:              "valid alpha name",
 			amlFilesystemName: "aqz",
 			volumeName:        "volName",
-			expected:          "aqz",
+			expected:          "volName-aqz",
 		},
 		{
 			desc:              "valid numeric name",
 			amlFilesystemName: "029",
 			volumeName:        "volName",
-			expected:          "029",
+			expected:          "volName-029",
 		},
 		{
 			desc:              "max length name",
-			amlFilesystemName: strings.Repeat("a", amlFilesystemNameMaxLength),
+			amlFilesystemName: strings.Repeat("a", amlFilesystemNameMaxLength-len("volName-")),
 			volumeName:        "volName",
-			expected:          strings.Repeat("a", amlFilesystemNameMaxLength),
+			expected:          "volName-" + strings.Repeat("a", amlFilesystemNameMaxLength-len("volName-")),
 		},
 		{
 			desc:              "name too long",
-			amlFilesystemName: strings.Repeat("a", amlFilesystemNameMaxLength+1),
+			amlFilesystemName: strings.Repeat("a", amlFilesystemNameMaxLength-len("volName-")+1),
 			volumeName:        "volName",
-			expected:          strings.Repeat("a", amlFilesystemNameMaxLength),
+			expected:          "volName-" + strings.Repeat("a", amlFilesystemNameMaxLength-len("volName-")),
 		},
 		{
-			desc:              "removes invalid characters when using volume name",
-			amlFilesystemName: "!@#$*volName%@#$",
-			volumeName:        "volName-",
-			expected:          "pvc-amlfs-volName",
+			desc:              "removes invalid characters when using default name",
+			amlFilesystemName: "!@#$*amlfsName%@#$",
+			volumeName:        "!@#$*volName%@#$",
+			expected:          "volName-azurelustre-csi",
 		},
 		{
-			desc:              "removes non alpha-numeric at end when using volume name",
-			amlFilesystemName: "a",
-			volumeName:        "vol-name-_-",
-			expected:          "pvc-amlfs-vol-name",
+			desc:              "removes non alphanumeric at beginning when using default name",
+			amlFilesystemName: "#",
+			volumeName:        "-_-volName",
+			expected:          "volName-azurelustre-csi",
 		},
 		{
-			desc:              "truncates when using volume name",
-			amlFilesystemName: "b",
-			volumeName:        strings.Repeat("a", amlFilesystemNameMaxLength+1),
-			expected:          "pvc-amlfs-" + strings.Repeat("a", amlFilesystemNameMaxLength-len("pvc-amlfs-")),
-		},
-		{
-			desc:              "name too short",
-			amlFilesystemName: "a",
-			volumeName:        "volName",
-			expected:          "pvc-amlfs-volName",
-		},
-		{
-			desc:              "invalid start character",
-			amlFilesystemName: "-aq",
-			volumeName:        "volName",
-			expected:          "pvc-amlfs-volName",
+			desc:              "truncates when using default name",
+			amlFilesystemName: "#",
+			volumeName:        strings.Repeat("a", amlFilesystemNameMaxLength-len("-azurelustre-csi")+1),
+			expected:          strings.Repeat("a", amlFilesystemNameMaxLength-len("-azurelustre-cs")) + "-azurelustre-cs",
 		},
 		{
 			desc:              "invalid end character",
 			amlFilesystemName: "aq-",
 			volumeName:        "volName",
-			expected:          "pvc-amlfs-volName",
+			expected:          "volName-azurelustre-csi",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
-			result := getValidAmlFilesystemName(test.amlFilesystemName, test.volumeName)
+			result := validateAndPrependVolumeName(test.amlFilesystemName, test.volumeName)
 			assert.Equal(t, test.expected, result, "input: %q, getValidAmlFilesystemName result: %q, expected: %q", test.amlFilesystemName, result, test.expected)
 		})
 	}

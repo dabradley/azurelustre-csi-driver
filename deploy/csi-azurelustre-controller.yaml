@@ -68,7 +68,7 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: azurelustre
-          image: davidbradleycsitestacr.azurecr.io/oss/kubernetes-csi/azurelustre-csi:v0.1.16-dynprov
+          image: davidbradleycsitestacr.azurecr.io/oss/kubernetes-csi/azurelustre-csi:v0.1.17-dynprov-davidbradley
           imagePullPolicy: Always
           args:
             - "-v=5"

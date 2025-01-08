@@ -238,17 +238,13 @@ func getVolume(volumeID string, context map[string]string) (*lustreVolume, error
 		volName = volFromID.name
 	}
 
-	// TODO: Handle nonstandard volume names (shouldn't be dynprov)
 	vol, err := newLustreVolume(volumeID, volName, context)
 	if err != nil {
 		return nil, err
 	}
-	// volume context does not match values in volume ID for volume "pvc-66a732c5-e37a-41d0-b62a-4b05d479ff89#lustrefs#10.2.0.5##davidbradley-amlfs-dyn-test"
-	// controllerserver needs to add amlfs name to context if exists ?
+
 	if volFromID != nil && *volFromID != *vol {
-		klog.Warningf("volume context does not match values in volume ID for volume %q", volumeID)
-		klog.Warningf("vol %#v", vol)
-		klog.Warningf("volFromID %#v", volFromID)
+		klog.Warningf("volume context does not match values in volume ID for volumeID %v", volumeID)
 	}
 
 	return vol, nil

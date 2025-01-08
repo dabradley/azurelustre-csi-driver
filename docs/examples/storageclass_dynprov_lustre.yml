@@ -30,6 +30,10 @@ parameters:
   tags: "owner=davidbradley"
   # resource-group-name: davidbradley-amlfs-rg # defaults to AKS resource group
   # identities: "identity1,identity2"
+  # root-squash-mode: RootOnly
+  # root-squash-nid-lists: "10.1.3.[7-9]@tcp;10.1.3.10@tcp"
+  # root-squash-uid: "1000"
+  # root-squash-gid: "2000"
 provisioner: azurelustre.csi.azure.com
 # Azure Lustre Cluster is removed after PVC deletion if reclaimPolicy is the default value "Delete".
 reclaimPolicy: Delete

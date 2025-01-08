@@ -5,6 +5,7 @@ go 1.23.1
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.16.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.7.0
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6 v6.2.0
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storagecache/armstoragecache/v4 v4.0.0
 	github.com/Azure/go-autorest/autorest v0.11.29
