@@ -22,18 +22,20 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	azure "sigs.k8s.io/cloud-provider-azure/pkg/provider"
 )
 
-// TODO_JUSJIN: update and add tests
-
 const (
-	fakeNodeID     = "fakeNodeID"
-	fakeDriverName = "fake"
-	vendorVersion  = "0.3.0"
+	fakeNodeID                = "fakeNodeID"
+	fakeDriverName            = "fake"
+	vendorVersion             = "0.3.0"
+	clusterRequestFailureName = "testShouldFail"
 )
 
 func NewFakeDriver() *Driver {
@@ -68,16 +70,16 @@ type FakeDynamicProvisioner struct {
 }
 
 func (f *FakeDynamicProvisioner) CreateAmlFilesystem(_ context.Context, amlFilesystemProperties *AmlFilesystemProperties) (string, error) {
-	if amlFilesystemProperties.AmlFilesystemName == "testShouldFail" {
-		return "", fmt.Errorf("testShouldFail")
+	if strings.HasSuffix(amlFilesystemProperties.AmlFilesystemName, clusterRequestFailureName) {
+		return "", status.Error(codes.InvalidArgument, clusterRequestFailureName)
 	}
 	f.Filesystems = append(f.Filesystems, amlFilesystemProperties)
 	return "127.0.0.2", nil
 }
 
 func (f *FakeDynamicProvisioner) DeleteAmlFilesystem(_ context.Context, _, amlFilesystemName string) error {
-	if amlFilesystemName == "testShouldFail" {
-		return fmt.Errorf("testShouldFail")
+	if amlFilesystemName == clusterRequestFailureName {
+		return status.Error(codes.InvalidArgument, clusterRequestFailureName)
 	}
 	var filesystems []*AmlFilesystemProperties
 	for _, filesystem := range f.Filesystems {
@@ -251,7 +253,7 @@ func TestGetLustreVolFromID(t *testing.T) {
 	}
 }
 
-func TestGetSubnetResourceID(t *testing.T) {
+func TestPopulateSubnetPropertiesFromCloudConfig(t *testing.T) {
 	testCases := []struct {
 		name     string
 		testFunc func(t *testing.T)
@@ -265,8 +267,18 @@ func TestGetSubnetResourceID(t *testing.T) {
 				d.cloud.NetworkResourceSubscriptionID = ""
 				d.cloud.ResourceGroup = "foo"
 				d.cloud.VnetResourceGroup = "foo"
-				actualOutput := d.getSubnetResourceID("", "", "")
-				expectedOutput := fmt.Sprintf(subnetTemplate, d.cloud.SubscriptionID, "foo", d.cloud.VnetName, d.cloud.SubnetName)
+				actualOutput := d.populateSubnetPropertiesFromCloudConfig(SubnetProperties{
+					VnetResourceGroup: "",
+					VnetName:          "",
+					SubnetName:        "",
+				})
+				expectedSubnetID := fmt.Sprintf(subnetTemplate, d.cloud.SubscriptionID, "foo", d.cloud.VnetName, d.cloud.SubnetName)
+				expectedOutput := SubnetProperties{
+					VnetResourceGroup: "foo",
+					VnetName:          d.cloud.VnetName,
+					SubnetName:        d.cloud.SubnetName,
+					SubnetID:          expectedSubnetID,
+				}
 				assert.Equal(t, expectedOutput, actualOutput, "cloud.SubscriptionID should be used as the SubID")
 			},
 		},
@@ -279,8 +291,18 @@ func TestGetSubnetResourceID(t *testing.T) {
 				d.cloud.NetworkResourceSubscriptionID = "fakeNetSubID"
 				d.cloud.ResourceGroup = "foo"
 				d.cloud.VnetResourceGroup = "foo"
-				actualOutput := d.getSubnetResourceID("", "", "")
-				expectedOutput := fmt.Sprintf(subnetTemplate, d.cloud.NetworkResourceSubscriptionID, "foo", d.cloud.VnetName, d.cloud.SubnetName)
+				actualOutput := d.populateSubnetPropertiesFromCloudConfig(SubnetProperties{
+					VnetResourceGroup: "",
+					VnetName:          "",
+					SubnetName:        "",
+				})
+				expectedSubnetID := fmt.Sprintf(subnetTemplate, d.cloud.NetworkResourceSubscriptionID, "foo", d.cloud.VnetName, d.cloud.SubnetName)
+				expectedOutput := SubnetProperties{
+					VnetResourceGroup: "foo",
+					VnetName:          d.cloud.VnetName,
+					SubnetName:        d.cloud.SubnetName,
+					SubnetID:          expectedSubnetID,
+				}
 				assert.Equal(t, expectedOutput, actualOutput, "cloud.NetworkResourceSubscriptionID should be used as the SubID")
 			},
 		},
@@ -293,9 +315,19 @@ func TestGetSubnetResourceID(t *testing.T) {
 				d.cloud.NetworkResourceSubscriptionID = "bar"
 				d.cloud.ResourceGroup = "fakeResourceGroup"
 				d.cloud.VnetResourceGroup = ""
-				actualOutput := d.getSubnetResourceID("", "", "")
-				expectedOutput := fmt.Sprintf(subnetTemplate, "bar", d.cloud.ResourceGroup, d.cloud.VnetName, d.cloud.SubnetName)
-				assert.Equal(t, expectedOutput, actualOutput, "cloud.Resourcegroup should be used as the rg")
+				actualOutput := d.populateSubnetPropertiesFromCloudConfig(SubnetProperties{
+					VnetResourceGroup: "",
+					VnetName:          "",
+					SubnetName:        "",
+				})
+				expectedSubnetID := fmt.Sprintf(subnetTemplate, "bar", d.cloud.ResourceGroup, d.cloud.VnetName, d.cloud.SubnetName)
+				expectedOutput := SubnetProperties{
+					VnetResourceGroup: d.cloud.ResourceGroup,
+					VnetName:          d.cloud.VnetName,
+					SubnetName:        d.cloud.SubnetName,
+					SubnetID:          expectedSubnetID,
+				}
+				assert.Equal(t, expectedOutput, actualOutput, "cloud.ResourceGroup should be used as the rg")
 			},
 		},
 		{
@@ -307,8 +339,18 @@ func TestGetSubnetResourceID(t *testing.T) {
 				d.cloud.NetworkResourceSubscriptionID = "bar"
 				d.cloud.ResourceGroup = "fakeResourceGroup"
 				d.cloud.VnetResourceGroup = "fakeVnetResourceGroup"
-				actualOutput := d.getSubnetResourceID("", "", "")
-				expectedOutput := fmt.Sprintf(subnetTemplate, "bar", d.cloud.VnetResourceGroup, d.cloud.VnetName, d.cloud.SubnetName)
+				actualOutput := d.populateSubnetPropertiesFromCloudConfig(SubnetProperties{
+					VnetResourceGroup: "",
+					VnetName:          "",
+					SubnetName:        "",
+				})
+				expectedSubnetID := fmt.Sprintf(subnetTemplate, "bar", d.cloud.VnetResourceGroup, d.cloud.VnetName, d.cloud.SubnetName)
+				expectedOutput := SubnetProperties{
+					VnetResourceGroup: d.cloud.VnetResourceGroup,
+					VnetName:          d.cloud.VnetName,
+					SubnetName:        d.cloud.SubnetName,
+					SubnetID:          expectedSubnetID,
+				}
 				assert.Equal(t, expectedOutput, actualOutput, "cloud.VnetResourceGroup should be used as the rg")
 			},
 		},
@@ -321,8 +363,18 @@ func TestGetSubnetResourceID(t *testing.T) {
 				d.cloud.NetworkResourceSubscriptionID = "bar"
 				d.cloud.ResourceGroup = "fakeResourceGroup"
 				d.cloud.VnetResourceGroup = "fakeVnetResourceGroup"
-				actualOutput := d.getSubnetResourceID("vnetrg", "vnetName", "subnetName")
-				expectedOutput := fmt.Sprintf(subnetTemplate, "bar", "vnetrg", "vnetName", "subnetName")
+				actualOutput := d.populateSubnetPropertiesFromCloudConfig(SubnetProperties{
+					VnetResourceGroup: "vnetrg",
+					VnetName:          "vnetName",
+					SubnetName:        "subnetName",
+				})
+				expectedSubnetID := fmt.Sprintf(subnetTemplate, "bar", "vnetrg", "vnetName", "subnetName")
+				expectedOutput := SubnetProperties{
+					VnetResourceGroup: "vnetrg",
+					VnetName:          "vnetName",
+					SubnetName:        "subnetName",
+					SubnetID:          expectedSubnetID,
+				}
 				assert.Equal(t, expectedOutput, actualOutput, "VnetResourceGroup, vnetName, subnetName is specified")
 			},
 		},

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storagecache/armstoragecache/v4"
@@ -47,6 +48,10 @@ const (
 	VolumeContextZones                = "zones"
 	VolumeContextTags                 = "tags"
 	VolumeContextIdentities           = "identities"
+	VolumeContextRootSquashMode       = "root-squash-mode"
+	VolumeContextRootSquashNidLists   = "root-squash-nid-lists"
+	VolumeContextRootSquashUID        = "root-squash-uid"
+	VolumeContextRootSquashGID        = "root-squash-gid"
 	defaultSizeInBytes                = 4 * util.TiB
 	laaSOBlockSizeInBytes             = 4 * util.TiB
 )
@@ -54,7 +59,22 @@ const (
 var (
 	timeRegexp             = regexp.MustCompile(`^([01]?[0-9]|2[0-3]):[0-5][0-9]$`)
 	amlFilesystemNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,78}[a-zA-Z0-9]$`)
+	rootSquashNidsReges    = regexp.MustCompile(`^[0-9.,;\[\]@tcp*-]+$`)
 )
+
+type SubnetProperties struct {
+	SubnetID          string
+	VnetName          string
+	VnetResourceGroup string
+	SubnetName        string
+}
+
+type RootSquashSettings struct {
+	SquashMode       armstoragecache.AmlFilesystemSquashMode
+	NoSquashNidLists string
+	SquashUID        int64
+	SquashGID        int64
+}
 
 type AmlFilesystemProperties struct {
 	ResourceGroupName    string
@@ -62,17 +82,15 @@ type AmlFilesystemProperties struct {
 	Location             string
 	Tags                 map[string]string
 	Identities           []string // Can only be "UserAssigned" identity
-	VnetName             string
-	VnetResourceGroup    string
-	SubnetName           string
-	SubnetID             string
+	SubnetInfo           SubnetProperties
 	MaintenanceDayOfWeek armstoragecache.MaintenanceDayOfWeekType
 	TimeOfDayUTC         string
 	StorageCapacityTiB   float32
 	SKUName              string
 	Zones                []string
+	RootSquashSettings   *RootSquashSettings
 	// HSM values?
-	//    Countainer string
+	//    Container string
 	//    ImportPrefix string
 	//    LoggingContainer string
 	// Encryption values?
@@ -84,6 +102,10 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 	var amlFilesystemProperties AmlFilesystemProperties
 	var amlFilesystemName string
 	var errorParameters []string
+	var squashMode armstoragecache.AmlFilesystemSquashMode
+	var noSquashNidLists string
+	var squashUID int64
+	var squashGID int64
 
 	amlFilesystemNameReplaceMap := map[string]string{}
 	shouldCreateAmlfsCluster := true
@@ -101,11 +123,11 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 		case VolumeContextLocation:
 			amlFilesystemProperties.Location = propertyValue
 		case VolumeContextVnetName:
-			amlFilesystemProperties.VnetName = propertyValue
+			amlFilesystemProperties.SubnetInfo.VnetName = propertyValue
 		case VolumeContextVnetResourceGroup:
-			amlFilesystemProperties.VnetResourceGroup = propertyValue
+			amlFilesystemProperties.SubnetInfo.VnetResourceGroup = propertyValue
 		case VolumeContextSubnetName:
-			amlFilesystemProperties.SubnetName = propertyValue
+			amlFilesystemProperties.SubnetInfo.SubnetName = propertyValue
 		case VolumeContextMaintenanceDayOfWeek:
 			possibleDayValues := armstoragecache.PossibleMaintenanceDayOfWeekTypeValues()
 			for _, dayOfWeekValue := range possibleDayValues {
@@ -151,6 +173,45 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 			}
 		case VolumeContextIdentities:
 			amlFilesystemProperties.Identities = strings.Split(propertyValue, ",")
+		case VolumeContextRootSquashMode:
+			possibleRootSquashModeValues := armstoragecache.PossibleAmlFilesystemSquashModeValues()
+			for _, rootSquashValue := range possibleRootSquashModeValues {
+				if string(rootSquashValue) == propertyValue {
+					squashMode = rootSquashValue
+					break
+				}
+			}
+			if len(squashMode) == 0 {
+				return nil, status.Errorf(
+					codes.InvalidArgument,
+					"CreateVolume Parameter %s must be one of: %v",
+					VolumeContextRootSquashMode,
+					possibleRootSquashModeValues,
+				)
+			}
+		case VolumeContextRootSquashNidLists:
+			if !rootSquashNidsReges.MatchString(propertyValue) {
+				return nil, status.Errorf(codes.InvalidArgument, "CreateVolume %v must be in the form '10.0.2.4@tcp;10.0.2.[6-8]@tcp;10.0.2.10@tcp', was: %s",
+					VolumeContextRootSquashNidLists,
+					propertyValue)
+			}
+			noSquashNidLists = propertyValue
+		case VolumeContextRootSquashUID:
+			value, err := parseSquashID(propertyValue)
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "CreateVolume %v value must be number between 1 and 4294967295, was: %s",
+					VolumeContextRootSquashUID,
+					propertyValue)
+			}
+			squashUID = value
+		case VolumeContextRootSquashGID:
+			value, err := parseSquashID(propertyValue)
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "CreateVolume %v value must be number between 1 and 4294967295, was: %s",
+					VolumeContextRootSquashGID,
+					propertyValue)
+			}
+			squashGID = value
 		case pvcNamespaceKey:
 			amlFilesystemNameReplaceMap[pvcNamespaceMetadata] = propertyValue
 		case pvcNameKey:
@@ -193,20 +254,47 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 
 		if len(amlFilesystemProperties.MaintenanceDayOfWeek) == 0 {
 			return nil, status.Errorf(codes.InvalidArgument,
-				"CreateVolume %s must be provided",
+				"CreateVolume %s must be provided for dynamically provisioned AMLFS",
 				VolumeContextMaintenanceDayOfWeek)
+		}
+
+		if len(amlFilesystemProperties.SKUName) == 0 {
+			return nil, status.Errorf(codes.InvalidArgument,
+				"CreateVolume %s must be provided for dynamically provisioned AMLFS",
+				VolumeContextSkuName)
 		}
 
 		if len(amlFilesystemProperties.TimeOfDayUTC) == 0 {
 			return nil, status.Errorf(codes.InvalidArgument,
-				"CreateVolume %s must be provided",
+				"CreateVolume %s must be provided for dynamically provisioned AMLFS",
 				VolumeContextTimeOfDayUtc)
 		}
 
 		if len(amlFilesystemProperties.Zones) == 0 {
 			return nil, status.Errorf(codes.InvalidArgument,
-				"CreateVolume %s must be provided",
+				"CreateVolume %s must be provided for dynamically provisioned AMLFS",
 				VolumeContextZones)
+		}
+
+		// Add root squash settings if set
+		if squashMode != "" {
+			// When root squash mode is set to RootOnly or All, all other root squash settings must be set
+			if squashMode != armstoragecache.AmlFilesystemSquashModeNone &&
+				(noSquashNidLists == "" || squashUID == 0 || squashGID == 0) {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid root squash info, must have valid %s, %s, and %s when %s is set to %s or %s",
+					VolumeContextRootSquashNidLists,
+					VolumeContextRootSquashUID,
+					VolumeContextRootSquashGID,
+					VolumeContextRootSquashMode,
+					armstoragecache.AmlFilesystemSquashModeRootOnly,
+					armstoragecache.AmlFilesystemSquashModeAll)
+			}
+			amlFilesystemProperties.RootSquashSettings = &RootSquashSettings{
+				SquashMode:       squashMode,
+				NoSquashNidLists: noSquashNidLists,
+				SquashUID:        squashUID,
+				SquashGID:        squashGID,
+			}
 		}
 
 		amlFilesystemName = strings.TrimSpace(util.ReplaceWithMap(amlFilesystemName, amlFilesystemNameReplaceMap))
@@ -216,12 +304,24 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 	return &amlFilesystemProperties, nil
 }
 
-func getValidAmlFilesystemName(amlFilesystemName, volName string) string {
-	validAmlFilesystemName := truncateAmlFilesystemName(amlFilesystemName)
+func parseSquashID(propertyValue string) (int64, error) {
+	value, err := strconv.ParseInt(propertyValue, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if value < 1 || value > 4294967295 {
+		return 0, fmt.Errorf("value must be between 1 and 4294967295")
+	}
+	return value, nil
+}
+
+func validateAndPrependVolumeName(amlFilesystemName, volName string) string {
+	validAmlFilesystemName := volName + "-" + amlFilesystemName
+	validAmlFilesystemName = truncateAmlFilesystemName(validAmlFilesystemName)
 	if !amlFilesystemNameRegex.MatchString(validAmlFilesystemName) {
-		prefix := "pvc-amlfs"
-		validAmlFilesystemName = prefix + "-" + volName
-		validAmlFilesystemName = regexp.MustCompile(`[^a-zA-Z0-9-_]+`).ReplaceAllString(validAmlFilesystemName, "") // TODO: Test
+		defaultName := "azurelustre-csi"
+		validAmlFilesystemName = volName + "-" + defaultName
+		validAmlFilesystemName = regexp.MustCompile(`[^a-zA-Z0-9-_]+`).ReplaceAllString(validAmlFilesystemName, "")
 		validAmlFilesystemName = truncateAmlFilesystemName(validAmlFilesystemName)
 		validAmlFilesystemName = strings.Trim(validAmlFilesystemName, "-_")
 		klog.Warningf("the requested volume name (%q) is invalid, so it is regenerated as (%q)", amlFilesystemName, validAmlFilesystemName)
@@ -261,7 +361,7 @@ func validateVolumeCapabilities(capabilities []*csi.VolumeCapability) error {
 
 // CreateVolume provisions a volume
 func (d *Driver) CreateVolume(
-	cxt context.Context,
+	ctx context.Context,
 	req *csi.CreateVolumeRequest,
 ) (*csi.CreateVolumeResponse, error) {
 	mc := metrics.NewMetricContext(
@@ -289,6 +389,11 @@ func (d *Driver) CreateVolume(
 			volName)
 	}
 	defer d.volumeLocks.Release(volName)
+
+	isOperationSucceeded := false
+	defer func() {
+		mc.ObserveOperationWithResult(isOperationSucceeded)
+	}()
 
 	parameters := req.GetParameters()
 	if parameters == nil {
@@ -342,48 +447,45 @@ func (d *Driver) CreateVolume(
 			amlFilesystemProperties.ResourceGroupName = d.resourceGroup
 		}
 
-		amlFilesystemProperties.SubnetID = d.getSubnetResourceID(
-			amlFilesystemProperties.VnetResourceGroup,
-			amlFilesystemProperties.VnetName,
-			amlFilesystemProperties.SubnetName,
-		)
+		amlFilesystemProperties.SubnetInfo = d.populateSubnetPropertiesFromCloudConfig(amlFilesystemProperties.SubnetInfo)
 
 		amlFilesystemProperties.StorageCapacityTiB = storageCapacityTib
 		klog.V(2).Infof("storageCapacityTib: %#v", storageCapacityTib)
 
-		// TODO: Check if already exists?
-		// TODO: Check if subnet is appropriate?
 		amlFilesystemName := amlFilesystemProperties.AmlFilesystemName
-		amlFilesystemName = getValidAmlFilesystemName(amlFilesystemName, volName)
+		amlFilesystemName = validateAndPrependVolumeName(amlFilesystemName, volName)
+		if !strings.Contains(amlFilesystemName, volName) {
+			return nil, status.Errorf(codes.InvalidArgument,
+				"CreateVolume invalid volume name %s, cannot create valid AMLFS name. Check length and characters",
+				volName)
+		}
 		amlFilesystemProperties.AmlFilesystemName = amlFilesystemName
 
-		mgsIPAddress, err = d.dynamicProvisioner.CreateAmlFilesystem(cxt, amlFilesystemProperties)
+		klog.V(2).Infof(
+			"beginning to create AMLFS cluster (%s)", amlFilesystemProperties.AmlFilesystemName,
+		)
+
+		mgsIPAddress, err = d.dynamicProvisioner.CreateAmlFilesystem(ctx, amlFilesystemProperties)
 		if err != nil {
-			return nil, status.Error(
-				codes.Unknown,
-				fmt.Sprintf("Error when creating AMLFS: {%s}", err),
-			)
+			errCode := status.Code(err)
+			if errCode == codes.Unknown {
+				klog.Errorf("unknown error occurred when creating AMLFS %s: %v", amlFilesystemProperties.AmlFilesystemName, err)
+				return nil, status.Error(codes.Unknown, err.Error())
+			}
+			klog.Warningf("error when creating AMLFS %s: %v", amlFilesystemProperties.AmlFilesystemName, err)
+			return nil, status.Errorf(errCode, "CreateVolume error when creating AMLFS %s: %v", amlFilesystemProperties.AmlFilesystemName, err)
 		}
 
 		util.SetKeyValueInMap(parameters, VolumeContextAmlFilesystemName, amlFilesystemProperties.AmlFilesystemName)
 		util.SetKeyValueInMap(parameters, VolumeContextResourceGroupName, amlFilesystemProperties.ResourceGroupName)
 		util.SetKeyValueInMap(parameters, VolumeContextMGSIPAddress, mgsIPAddress)
-		util.SetKeyValueInMap(parameters, VolumeContextFSName, DefaultLustreFsName) // Can we always assume this or should we parse it out?
+		util.SetKeyValueInMap(parameters, VolumeContextFSName, DefaultLustreFsName)
 	}
 
 	volumeID, err := createVolumeIDFromParams(volName, parameters)
 	if err != nil {
 		return nil, err
 	}
-
-	isOperationSucceeded := false
-	defer func() {
-		mc.ObserveOperationWithResult(isOperationSucceeded)
-	}()
-
-	klog.V(2).Infof(
-		"begin to create volumeID(%s)", volumeID,
-	)
 
 	klog.V(2).Infof("created volumeID(%s) successfully", volumeID)
 
@@ -469,7 +571,7 @@ func checkVolumeRequest(req *csi.CreateVolumeRequest) error {
 
 // DeleteVolume delete a volume
 func (d *Driver) DeleteVolume(
-	cxt context.Context, req *csi.DeleteVolumeRequest,
+	ctx context.Context, req *csi.DeleteVolumeRequest,
 ) (*csi.DeleteVolumeResponse, error) {
 	mc := metrics.NewMetricContext(azureLustreCSIDriverName,
 		"controller_delete_volume",
@@ -513,12 +615,15 @@ func (d *Driver) DeleteVolume(
 	klog.V(2).Infof("deleting volumeID(%s)", volumeID)
 
 	if amlFilesystemName != "" {
-		err := d.dynamicProvisioner.DeleteAmlFilesystem(cxt, lustreVolume.resourceGroupName, amlFilesystemName)
+		err := d.dynamicProvisioner.DeleteAmlFilesystem(ctx, lustreVolume.resourceGroupName, amlFilesystemName)
 		if err != nil {
-			return nil, status.Error(
-				codes.Unknown,
-				fmt.Sprintf("Error when deleting AMLFS: {%s}", err),
-			)
+			errCode := status.Code(err)
+			if errCode == codes.Unknown {
+				klog.Errorf("unknown error occurred when deleting AMLFS %s in resource group %s: %v", amlFilesystemName, lustreVolume.resourceGroupName, err)
+				return nil, status.Error(codes.Unknown, err.Error())
+			}
+			klog.Warningf("error when deleting AMLFS %s in resource group %s: %v", amlFilesystemName, lustreVolume.resourceGroupName, err)
+			return nil, status.Errorf(errCode, "DeleteVolume error when deleting AMLFS %s in resource group %s: %v", amlFilesystemName, lustreVolume.resourceGroupName, err)
 		}
 	}
 
@@ -579,13 +684,10 @@ func (d *Driver) ControllerGetCapabilities(
 func createVolumeIDFromParams(volName string, params map[string]string) (string, error) {
 	var mgsIPAddress, azureLustreName, amlFilesystemName, resourceGroupName, subDir string
 
-	// var errorParameters []string
-
 	// validate parameters (case-insensitive).
 	for k, v := range params {
 		switch strings.ToLower(k) {
 		case VolumeContextMGSIPAddress:
-			// Handle this entirely in the CreateVolume method?
 			mgsIPAddress = v
 		case VolumeContextFSName:
 			azureLustreName = v
