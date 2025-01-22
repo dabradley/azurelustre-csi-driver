@@ -698,7 +698,7 @@ func (d *Driver) internalUnmount(mountPath string) error {
 }
 
 // Ensures that the given subpath, when joined with any base path, will be a path
-// within the given base path, and not equal to it. This ensures that the this
+// within the given base path, and not equal to it. This ensures that this
 // subpath value can be safely created or deleted under the base path without
 // affecting other data in the base path.
 func ensureStrictSubpath(subPath string) bool {
@@ -707,14 +707,12 @@ func ensureStrictSubpath(subPath string) bool {
 
 // Convert context parameters to a lustreVolume
 func newLustreVolume(volumeID, volumeName string, params map[string]string) (*lustreVolume, error) {
-	var mgsIPAddress, azureLustreName, subDir, amlFilesystemName, resourceGroupName string
+	var mgsIPAddress, subDir, amlFilesystemName, resourceGroupName string
 	// validate parameters (case-insensitive).
 	for k, v := range params {
 		switch strings.ToLower(k) {
 		case VolumeContextMGSIPAddress:
 			mgsIPAddress = v
-		case VolumeContextFSName:
-			azureLustreName = v
 		case VolumeContextSubDir:
 			subDir = v
 			subDir = strings.Trim(subDir, "/")
@@ -739,18 +737,10 @@ func newLustreVolume(volumeID, volumeName string, params map[string]string) (*lu
 		)
 	}
 
-	azureLustreName = strings.Trim(azureLustreName, "/")
-	if len(azureLustreName) == 0 {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"Context fs-name must be provided",
-		)
-	}
-
 	vol := &lustreVolume{
 		name:              volumeName,
 		mgsIPAddress:      mgsIPAddress,
-		azureLustreName:   azureLustreName,
+		azureLustreName:   DefaultLustreFsName,
 		subDir:            subDir,
 		id:                volumeID,
 		amlFilesystemName: amlFilesystemName,

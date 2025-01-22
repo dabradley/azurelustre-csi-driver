@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storagecache/armstoragecache/v4"
@@ -48,18 +47,13 @@ const (
 	VolumeContextZones                = "zones"
 	VolumeContextTags                 = "tags"
 	VolumeContextIdentities           = "identities"
-	VolumeContextRootSquashMode       = "root-squash-mode"
-	VolumeContextRootSquashNidLists   = "root-squash-nid-lists"
-	VolumeContextRootSquashUID        = "root-squash-uid"
-	VolumeContextRootSquashGID        = "root-squash-gid"
 	defaultSizeInBytes                = 4 * util.TiB
-	laaSOBlockSizeInBytes             = 4 * util.TiB
+	defaultLaaSOBlockSizeInTib        = 4
 )
 
 var (
 	timeRegexp             = regexp.MustCompile(`^([01]?[0-9]|2[0-3]):[0-5][0-9]$`)
 	amlFilesystemNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,78}[a-zA-Z0-9]$`)
-	rootSquashNidsReges    = regexp.MustCompile(`^[0-9.,;\[\]@tcp*-]+$`)
 )
 
 type SubnetProperties struct {
@@ -67,13 +61,6 @@ type SubnetProperties struct {
 	VnetName          string
 	VnetResourceGroup string
 	SubnetName        string
-}
-
-type RootSquashSettings struct {
-	SquashMode       armstoragecache.AmlFilesystemSquashMode
-	NoSquashNidLists string
-	SquashUID        int64
-	SquashGID        int64
 }
 
 type AmlFilesystemProperties struct {
@@ -88,24 +75,12 @@ type AmlFilesystemProperties struct {
 	StorageCapacityTiB   float32
 	SKUName              string
 	Zones                []string
-	RootSquashSettings   *RootSquashSettings
-	// HSM values?
-	//    Container string
-	//    ImportPrefix string
-	//    LoggingContainer string
-	// Encryption values?
-	//    KeyUrl string
-	//    SourceVaultId string
 }
 
 func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemProperties, error) {
 	var amlFilesystemProperties AmlFilesystemProperties
 	var amlFilesystemName string
 	var errorParameters []string
-	var squashMode armstoragecache.AmlFilesystemSquashMode
-	var noSquashNidLists string
-	var squashUID int64
-	var squashGID int64
 
 	amlFilesystemNameReplaceMap := map[string]string{}
 	shouldCreateAmlfsCluster := true
@@ -173,45 +148,6 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 			}
 		case VolumeContextIdentities:
 			amlFilesystemProperties.Identities = strings.Split(propertyValue, ",")
-		case VolumeContextRootSquashMode:
-			possibleRootSquashModeValues := armstoragecache.PossibleAmlFilesystemSquashModeValues()
-			for _, rootSquashValue := range possibleRootSquashModeValues {
-				if string(rootSquashValue) == propertyValue {
-					squashMode = rootSquashValue
-					break
-				}
-			}
-			if len(squashMode) == 0 {
-				return nil, status.Errorf(
-					codes.InvalidArgument,
-					"CreateVolume Parameter %s must be one of: %v",
-					VolumeContextRootSquashMode,
-					possibleRootSquashModeValues,
-				)
-			}
-		case VolumeContextRootSquashNidLists:
-			if !rootSquashNidsReges.MatchString(propertyValue) {
-				return nil, status.Errorf(codes.InvalidArgument, "CreateVolume %v must be in the form '10.0.2.4@tcp;10.0.2.[6-8]@tcp;10.0.2.10@tcp', was: %s",
-					VolumeContextRootSquashNidLists,
-					propertyValue)
-			}
-			noSquashNidLists = propertyValue
-		case VolumeContextRootSquashUID:
-			value, err := parseSquashID(propertyValue)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "CreateVolume %v value must be number between 1 and 4294967295, was: %s",
-					VolumeContextRootSquashUID,
-					propertyValue)
-			}
-			squashUID = value
-		case VolumeContextRootSquashGID:
-			value, err := parseSquashID(propertyValue)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "CreateVolume %v value must be number between 1 and 4294967295, was: %s",
-					VolumeContextRootSquashGID,
-					propertyValue)
-			}
-			squashGID = value
 		case pvcNamespaceKey:
 			amlFilesystemNameReplaceMap[pvcNamespaceMetadata] = propertyValue
 		case pvcNameKey:
@@ -276,43 +212,11 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 				VolumeContextZones)
 		}
 
-		// Add root squash settings if set
-		if squashMode != "" {
-			// When root squash mode is set to RootOnly or All, all other root squash settings must be set
-			if squashMode != armstoragecache.AmlFilesystemSquashModeNone &&
-				(noSquashNidLists == "" || squashUID == 0 || squashGID == 0) {
-				return nil, status.Errorf(codes.InvalidArgument, "invalid root squash info, must have valid %s, %s, and %s when %s is set to %s or %s",
-					VolumeContextRootSquashNidLists,
-					VolumeContextRootSquashUID,
-					VolumeContextRootSquashGID,
-					VolumeContextRootSquashMode,
-					armstoragecache.AmlFilesystemSquashModeRootOnly,
-					armstoragecache.AmlFilesystemSquashModeAll)
-			}
-			amlFilesystemProperties.RootSquashSettings = &RootSquashSettings{
-				SquashMode:       squashMode,
-				NoSquashNidLists: noSquashNidLists,
-				SquashUID:        squashUID,
-				SquashGID:        squashGID,
-			}
-		}
-
 		amlFilesystemName = strings.TrimSpace(util.ReplaceWithMap(amlFilesystemName, amlFilesystemNameReplaceMap))
 		amlFilesystemProperties.AmlFilesystemName = amlFilesystemName
 	}
 
 	return &amlFilesystemProperties, nil
-}
-
-func parseSquashID(propertyValue string) (int64, error) {
-	value, err := strconv.ParseInt(propertyValue, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	if value < 1 || value > 4294967295 {
-		return 0, fmt.Errorf("value must be between 1 and 4294967295")
-	}
-	return value, nil
 }
 
 func validateAndPrependVolumeName(amlFilesystemName, volName string) string {
@@ -419,10 +323,23 @@ func (d *Driver) CreateVolume(
 	klog.V(2).Infof("capacityInBytes: %#v", capacityInBytes)
 	if capacityInBytes == 0 {
 		capacityInBytes = defaultSizeInBytes
+		klog.V(2).Infof("using default capacity: %#v", capacityInBytes)
 	}
-	klog.V(2).Infof("capacityInBytes: %#v", capacityInBytes)
 
-	capacityInBytes, err = d.roundToAmlfsBlockSizeForSku(capacityInBytes, amlFilesystemProperties.SKUName)
+	blockSizeInBytes := int64(defaultLaaSOBlockSizeInTib) * util.TiB
+	maxCapacityInBytes := int64(0)
+
+	if shouldCreateAmlfsCluster {
+		klog.V(2).Infof("finding capacity based on SKU %s for location %s", amlFilesystemProperties.SKUName, amlFilesystemProperties.Location)
+		lustreSkuValue, err := d.getBlockSizeAndMaxCapacityForSkuInLocation(ctx, amlFilesystemProperties.SKUName, amlFilesystemProperties.Location)
+		if err != nil {
+			return nil, err
+		}
+		blockSizeInBytes = lustreSkuValue.IncrementInTib * util.TiB
+		maxCapacityInBytes = lustreSkuValue.MaximumInTib * util.TiB
+	}
+
+	capacityInBytes, err = d.roundToAmlfsBlockSize(capacityInBytes, blockSizeInBytes, maxCapacityInBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -472,7 +389,7 @@ func (d *Driver) CreateVolume(
 				klog.Errorf("unknown error occurred when creating AMLFS %s: %v", amlFilesystemProperties.AmlFilesystemName, err)
 				return nil, status.Error(codes.Unknown, err.Error())
 			}
-			klog.Warningf("error when creating AMLFS %s: %v", amlFilesystemProperties.AmlFilesystemName, err)
+			klog.Errorf("error when creating AMLFS %s: %v", amlFilesystemProperties.AmlFilesystemName, err)
 			return nil, status.Errorf(errCode, "CreateVolume error when creating AMLFS %s: %v", amlFilesystemProperties.AmlFilesystemName, err)
 		}
 
@@ -500,40 +417,45 @@ func (d *Driver) CreateVolume(
 	}, nil
 }
 
-func (d *Driver) roundToAmlfsBlockSizeForSku(capacityInBytes int64, skuName string) (int64, error) {
+func (d *Driver) getBlockSizeAndMaxCapacityForSkuInLocation(ctx context.Context, skuName, location string) (*LustreSkuValue, error) {
+	skus := d.dynamicProvisioner.GetSkuValuesForLocation(ctx, location)
+	retrievedSkuValue, ok := skus[skuName]
+	if !ok {
+		validSkus := make([]string, 0, len(skus))
+		for k := range skus {
+			validSkus = append(validSkus, k)
+		}
+		return nil, status.Errorf(
+			codes.InvalidArgument,
+			"CreateVolume Parameter %s must be one of: %v",
+			VolumeContextSkuName,
+			validSkus,
+		)
+	}
+	return retrievedSkuValue, nil
+}
+
+func (d *Driver) roundToAmlfsBlockSize(capacityInBytes, blockSizeInBytes, maxCapacityInBytes int64) (int64, error) {
 	if capacityInBytes == 0 {
 		capacityInBytes = defaultSizeInBytes
 	}
-	skuBlockSizeInBytes := int64(defaultSizeInBytes)
-	maxCapacityInBytes := int64(0)
-	valuesForSku, ok := d.lustreSkuValues[skuName]
-	if !ok {
-		if skuName != "" {
-			validSkus := make([]string, 0, len(d.lustreSkuValues))
-			for k := range d.lustreSkuValues {
-				validSkus = append(validSkus, k)
-			}
-			return 0, status.Errorf(
-				codes.InvalidArgument,
-				"CreateVolume Parameter %s must be one of: %v",
-				VolumeContextSkuName,
-				validSkus,
-			)
-		}
-	} else {
-		blockSizeInTiB := valuesForSku.IncrementInTib
-		skuBlockSizeInBytes = blockSizeInTiB * util.TiB
-		maxCapacityInBytes = valuesForSku.MaximumInTib * util.TiB
+
+	if blockSizeInBytes == 0 {
+		blockSizeInBytes = defaultLaaSOBlockSizeInTib * util.TiB
 	}
-	capacityInBytes = ((capacityInBytes + skuBlockSizeInBytes - 1) /
-		skuBlockSizeInBytes) * skuBlockSizeInBytes
-	if maxCapacityInBytes > 0 {
-		maxCapacityInBytes := valuesForSku.MaximumInTib * util.TiB
-		if capacityInBytes > maxCapacityInBytes || capacityInBytes < 0 {
-			return 0, status.Errorf(codes.InvalidArgument, "Requested capacity %d exceeds maximum capacity %d for SKU %s", capacityInBytes, maxCapacityInBytes, skuName)
-		}
+
+	roundedCapacityInBytes := ((capacityInBytes + blockSizeInBytes - 1) /
+		blockSizeInBytes) * blockSizeInBytes
+
+	if roundedCapacityInBytes < capacityInBytes {
+		return 0, status.Errorf(codes.InvalidArgument, "Requested capacity %d cannot be rounded up to next block of size %d, value overflow", capacityInBytes, blockSizeInBytes)
 	}
-	return capacityInBytes, nil
+
+	if maxCapacityInBytes > 0 && roundedCapacityInBytes > maxCapacityInBytes {
+		return 0, status.Errorf(codes.InvalidArgument, "Requested capacity %d exceeds maximum capacity %d for SKU in this location", capacityInBytes, maxCapacityInBytes)
+	}
+
+	return roundedCapacityInBytes, nil
 }
 
 func checkVolumeRequest(req *csi.CreateVolumeRequest) error {
@@ -622,7 +544,7 @@ func (d *Driver) DeleteVolume(
 				klog.Errorf("unknown error occurred when deleting AMLFS %s in resource group %s: %v", amlFilesystemName, lustreVolume.resourceGroupName, err)
 				return nil, status.Error(codes.Unknown, err.Error())
 			}
-			klog.Warningf("error when deleting AMLFS %s in resource group %s: %v", amlFilesystemName, lustreVolume.resourceGroupName, err)
+			klog.Errorf("error when deleting AMLFS %s in resource group %s: %v", amlFilesystemName, lustreVolume.resourceGroupName, err)
 			return nil, status.Errorf(errCode, "DeleteVolume error when deleting AMLFS %s in resource group %s: %v", amlFilesystemName, lustreVolume.resourceGroupName, err)
 		}
 	}
@@ -682,15 +604,13 @@ func (d *Driver) ControllerGetCapabilities(
 
 // Convert VolumeCreate parameters to a volume id
 func createVolumeIDFromParams(volName string, params map[string]string) (string, error) {
-	var mgsIPAddress, azureLustreName, amlFilesystemName, resourceGroupName, subDir string
+	var mgsIPAddress, amlFilesystemName, resourceGroupName, subDir string
 
 	// validate parameters (case-insensitive).
 	for k, v := range params {
 		switch strings.ToLower(k) {
 		case VolumeContextMGSIPAddress:
 			mgsIPAddress = v
-		case VolumeContextFSName:
-			azureLustreName = v
 		case VolumeContextAmlFilesystemName:
 			amlFilesystemName = v
 		case VolumeContextResourceGroupName:
@@ -708,15 +628,7 @@ func createVolumeIDFromParams(volName string, params map[string]string) (string,
 		}
 	}
 
-	azureLustreName = strings.Trim(azureLustreName, "/")
-	if len(azureLustreName) == 0 {
-		return "", status.Error(
-			codes.InvalidArgument,
-			"CreateVolume Parameter fs-name must be provided",
-		)
-	}
-
-	volumeID := fmt.Sprintf(volumeIDTemplate, volName, azureLustreName, mgsIPAddress, subDir, amlFilesystemName, resourceGroupName)
+	volumeID := fmt.Sprintf(volumeIDTemplate, volName, DefaultLustreFsName, mgsIPAddress, subDir, amlFilesystemName, resourceGroupName)
 
 	return volumeID, nil
 }

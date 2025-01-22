@@ -54,32 +54,35 @@ func NewFakeDriver() *Driver {
 	driver.resourceGroup = "defaultFakeResourceGroup"
 	driver.dynamicProvisioner = &FakeDynamicProvisioner{}
 
-	driver.lustreSkuValues = map[string]lustreSkuValue{
-		"AMLFS-Durable-Premium-40":  {IncrementInTib: 48, MaximumInTib: 768},
-		"AMLFS-Durable-Premium-125": {IncrementInTib: 16, MaximumInTib: 128},
-		"AMLFS-Durable-Premium-250": {IncrementInTib: 8, MaximumInTib: 128},
-		"AMLFS-Durable-Premium-500": {IncrementInTib: 4, MaximumInTib: 128},
-	}
-
 	return driver
 }
 
 type FakeDynamicProvisioner struct {
 	DynamicProvisionerInterface
-	Filesystems []*AmlFilesystemProperties
+	Filesystems   []*AmlFilesystemProperties
+	fakeCallCount map[string]int
+}
+
+func (f *FakeDynamicProvisioner) recordFakeCall(name string) {
+	if f.fakeCallCount == nil {
+		f.fakeCallCount = make(map[string]int)
+	}
+	f.fakeCallCount[name]++
 }
 
 func (f *FakeDynamicProvisioner) CreateAmlFilesystem(_ context.Context, amlFilesystemProperties *AmlFilesystemProperties) (string, error) {
+	f.recordFakeCall("CreateAmlFilesystem")
 	if strings.HasSuffix(amlFilesystemProperties.AmlFilesystemName, clusterRequestFailureName) {
-		return "", status.Error(codes.InvalidArgument, clusterRequestFailureName)
+		return "", status.Errorf(codes.InvalidArgument, "error occurred calling API: %s", clusterRequestFailureName)
 	}
 	f.Filesystems = append(f.Filesystems, amlFilesystemProperties)
 	return "127.0.0.2", nil
 }
 
 func (f *FakeDynamicProvisioner) DeleteAmlFilesystem(_ context.Context, _, amlFilesystemName string) error {
+	f.recordFakeCall("DeleteAmlFilesystem")
 	if amlFilesystemName == clusterRequestFailureName {
-		return status.Error(codes.InvalidArgument, clusterRequestFailureName)
+		return status.Errorf(codes.InvalidArgument, "error occurred calling API: %s", clusterRequestFailureName)
 	}
 	var filesystems []*AmlFilesystemProperties
 	for _, filesystem := range f.Filesystems {
@@ -89,6 +92,16 @@ func (f *FakeDynamicProvisioner) DeleteAmlFilesystem(_ context.Context, _, amlFi
 	}
 	f.Filesystems = filesystems
 	return nil
+}
+
+func (f *FakeDynamicProvisioner) GetSkuValuesForLocation(_ context.Context, _ string) map[string]*LustreSkuValue {
+	f.recordFakeCall("GetSkuValuesForLocation")
+	return map[string]*LustreSkuValue{
+		"AMLFS-Durable-Premium-40":  {IncrementInTib: 48, MaximumInTib: 768},
+		"AMLFS-Durable-Premium-125": {IncrementInTib: 16, MaximumInTib: 128},
+		"AMLFS-Durable-Premium-250": {IncrementInTib: 8, MaximumInTib: 128},
+		"AMLFS-Durable-Premium-500": {IncrementInTib: 4, MaximumInTib: 128},
+	}
 }
 
 func TestNewDriver(t *testing.T) {

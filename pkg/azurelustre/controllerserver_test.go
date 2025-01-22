@@ -24,7 +24,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storagecache/armstoragecache/v4"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,6 +122,17 @@ func TestCreateVolume_Success(t *testing.T) {
 	assert.NotEmpty(t, rep.GetVolume().GetVolumeContext())
 }
 
+func TestCreateVolume_Success_DoesNotCallDynamicProvisioner(t *testing.T) {
+	d := NewFakeDriver()
+	fakeDynamicProvisioner := &FakeDynamicProvisioner{}
+	d.dynamicProvisioner = fakeDynamicProvisioner
+	req := buildCreateVolumeRequest()
+	_, err := d.CreateVolume(context.Background(), req)
+	require.NoError(t, err)
+	assert.Empty(t, fakeDynamicProvisioner.Filesystems, 0)
+	assert.Empty(t, fakeDynamicProvisioner.fakeCallCount, 0, "unexpected calls made to dynamic provisioner")
+}
+
 func TestDynamicCreateVolume_Success(t *testing.T) {
 	d := NewFakeDriver()
 	ctrl := gomock.NewController(t)
@@ -171,6 +181,9 @@ func TestDynamicCreateVolume_Success_SendsCorrectProperties(t *testing.T) {
 	assert.NotZero(t, rep.GetVolume().GetCapacityBytes())
 	assert.NotEmpty(t, rep.GetVolume().GetVolumeContext())
 	require.Len(t, fakeDynamicProvisioner.Filesystems, 1)
+	require.Len(t, fakeDynamicProvisioner.fakeCallCount, 2, "unexpected calls made to dynamic provisioner")
+	require.Equal(t, 1, fakeDynamicProvisioner.fakeCallCount["CreateAmlFilesystem"])
+	require.Equal(t, 1, fakeDynamicProvisioner.fakeCallCount["GetSkuValuesForLocation"])
 	assert.Equal(t, expectedAmlfsProperties, fakeDynamicProvisioner.Filesystems[0])
 }
 
@@ -224,59 +237,89 @@ func TestDynamicCreateVolume_Success_NameMapping(t *testing.T) {
 	pvcName := "pvc_name"
 	pvcNamespace := "pvc_namespace"
 	pvName := "pv_name"
-	nameInputs := []string{
-		"test-filesystem",
-		"test-filesystem-${pvc.metadata.name}",
-		"test-filesystem-${pvc.metadata.namespace}",
-		"test-filesystem-${pv.metadata.name}",
+
+	testCases := []struct {
+		fileSystemName     string
+		expectedVolumeName string
+	}{
+		{
+			fileSystemName:     "test-filesystem",
+			expectedVolumeName: "test_volume-test-filesystem",
+		},
+		{
+			fileSystemName:     "test-filesystem-${pvc.metadata.name}",
+			expectedVolumeName: "test_volume-test-filesystem-" + pvcName,
+		},
+		{
+			fileSystemName:     "test-filesystem-${pvc.metadata.namespace}",
+			expectedVolumeName: "test_volume-test-filesystem-" + pvcNamespace,
+		},
+		{
+			fileSystemName:     "test-filesystem-${pv.metadata.name}",
+			expectedVolumeName: "test_volume-test-filesystem-" + pvName,
+		},
 	}
-	expectedOutputs := []string{
-		"test_volume-test-filesystem",
-		"test_volume-test-filesystem-" + pvcName,
-		"test_volume-test-filesystem-" + pvcNamespace,
-		"test_volume-test-filesystem-" + pvName,
-	}
-	d := NewFakeDriver()
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	d.cloud = azure.GetTestCloud(ctrl)
-	for idx, nameInput := range nameInputs {
-		t.Run(nameInput, func(t *testing.T) {
+	for _, tC := range testCases {
+		t.Run(tC.fileSystemName, func(t *testing.T) {
+			d := NewFakeDriver()
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+			d.cloud = azure.GetTestCloud(ctrl)
+
 			req := buildDynamicProvCreateVolumeRequest()
 			req.Parameters[pvcNameKey] = pvcName
 			req.Parameters[pvcNamespaceKey] = pvcNamespace
 			req.Parameters[pvNameKey] = pvName
-			req.Parameters["amlfilesystem-name"] = nameInput
+			req.Parameters["amlfilesystem-name"] = tC.fileSystemName
 			rep, err := d.CreateVolume(context.Background(), req)
 			require.NoError(t, err)
 			assert.NotEmpty(t, rep.GetVolume())
-			expectedOutput := fmt.Sprintf("test_volume#lustrefs#127.0.0.2#testSubDir#%s#test-resource-group", expectedOutputs[idx])
+			expectedOutput := fmt.Sprintf("test_volume#lustrefs#127.0.0.2#testSubDir#%s#test-resource-group", tC.expectedVolumeName)
 			assert.Equal(t, expectedOutput, rep.GetVolume().GetVolumeId())
 		})
 	}
 }
 
 func TestCreateVolume_Success_CapacityRoundUp(t *testing.T) {
-	testDescriptions := []string{
-		"round 0 to default size", "round block size - 1 to next block size", "remains at exact block size", "round block size + 1 to next block size",
-	}
-	capacityInputs := []int64{
-		0, laaSOBlockSizeInBytes - 1, laaSOBlockSizeInBytes, laaSOBlockSizeInBytes + 1,
-	}
-	expectedOutputs := []int64{
-		defaultSizeInBytes, laaSOBlockSizeInBytes, laaSOBlockSizeInBytes, laaSOBlockSizeInBytes * 2,
-	}
+	defaultLaaSOBlockSizeInBytes := int64(defaultLaaSOBlockSizeInTib) * util.TiB
 
-	d := NewFakeDriver()
-	req := buildCreateVolumeRequest()
-	for idx, capacityInput := range capacityInputs {
-		t.Run(testDescriptions[idx], func(t *testing.T) {
+	testCases := []struct {
+		desc     string
+		capacity int64
+		expected int64
+	}{
+		{
+			desc:     "round 0 to default size",
+			capacity: 0,
+			expected: defaultSizeInBytes,
+		},
+		{
+			desc:     "round block size - 1 to next block size",
+			capacity: defaultLaaSOBlockSizeInBytes - 1,
+			expected: defaultLaaSOBlockSizeInBytes,
+		},
+		{
+			desc:     "remains at exact block size",
+			capacity: defaultLaaSOBlockSizeInBytes,
+			expected: defaultLaaSOBlockSizeInBytes,
+		},
+		{
+			desc:     "round block size + 1 to next block size",
+			capacity: defaultLaaSOBlockSizeInBytes + 1,
+			expected: defaultLaaSOBlockSizeInBytes * 2,
+		},
+	}
+	for _, tC := range testCases {
+		t.Run(tC.desc, func(t *testing.T) {
+			d := NewFakeDriver()
+			req := buildCreateVolumeRequest()
+
 			req.CapacityRange = &csi.CapacityRange{
-				RequiredBytes: capacityInput,
+				RequiredBytes: tC.capacity,
 			}
 			rep, err := d.CreateVolume(context.Background(), req)
 			require.NoError(t, err)
-			assert.Equal(t, expectedOutputs[idx], rep.GetVolume().GetCapacityBytes())
+			assert.Equal(t, tC.expected, rep.GetVolume().GetCapacityBytes())
 		})
 	}
 }
@@ -409,7 +452,7 @@ func TestCreateVolume_Err_CapacityAboveSkuMax(t *testing.T) {
 	d := NewFakeDriver()
 	req := buildDynamicProvCreateVolumeRequest()
 	req.CapacityRange = &csi.CapacityRange{
-		RequiredBytes: math.MaxInt64,
+		RequiredBytes: 9000 * util.TiB,
 	}
 	_, err := d.CreateVolume(context.Background(), req)
 	require.Error(t, err)
@@ -417,6 +460,20 @@ func TestCreateVolume_Err_CapacityAboveSkuMax(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
 	require.ErrorContains(t, err, "exceeds maximum capacity")
+}
+
+func TestCreateVolume_Err_CapacityOverflow(t *testing.T) {
+	d := NewFakeDriver()
+	req := buildDynamicProvCreateVolumeRequest()
+	req.CapacityRange = &csi.CapacityRange{
+		RequiredBytes: math.MaxInt64,
+	}
+	_, err := d.CreateVolume(context.Background(), req)
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "value overflow")
 }
 
 func TestCreateVolume_Err_CapacityAboveLimit(t *testing.T) {
@@ -434,28 +491,26 @@ func TestCreateVolume_Err_CapacityAboveLimit(t *testing.T) {
 	require.ErrorContains(t, err, "greater than capacity limit")
 }
 
-func TestCreateVolume_Err_ParametersNoFSName(t *testing.T) {
+func TestCreateVolume_Success_NoFSName(t *testing.T) {
 	d := NewFakeDriver()
 	req := buildCreateVolumeRequest()
 	delete(req.GetParameters(), VolumeContextFSName)
-	_, err := d.CreateVolume(context.Background(), req)
-	require.Error(t, err)
-	grpcStatus, ok := status.FromError(err)
-	assert.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	require.ErrorContains(t, err, "fs-name")
+	rep, err := d.CreateVolume(context.Background(), req)
+	require.NoError(t, err)
+	assert.NotEmpty(t, rep.GetVolume())
+	expectedOutput := "test_volume#lustrefs#127.0.0.1#testSubDir##"
+	assert.Equal(t, expectedOutput, rep.GetVolume().GetVolumeId())
 }
 
-func TestCreateVolume_Err_ParametersEmptyFSName(t *testing.T) {
+func TestCreateVolume_Success_EmptyFSName(t *testing.T) {
 	d := NewFakeDriver()
 	req := buildCreateVolumeRequest()
 	req.GetParameters()[VolumeContextFSName] = ""
-	_, err := d.CreateVolume(context.Background(), req)
-	require.Error(t, err)
-	grpcStatus, ok := status.FromError(err)
-	assert.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	require.ErrorContains(t, err, "fs-name")
+	rep, err := d.CreateVolume(context.Background(), req)
+	require.NoError(t, err)
+	assert.NotEmpty(t, rep.GetVolume())
+	expectedOutput := "test_volume#lustrefs#127.0.0.1#testSubDir##"
+	assert.Equal(t, expectedOutput, rep.GetVolume().GetVolumeId())
 }
 
 func TestCreateVolume_Err_ParametersEmptySubDir(t *testing.T) {
@@ -651,6 +706,16 @@ func TestDeleteVolume_Success(t *testing.T) {
 	req := &csi.DeleteVolumeRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
 			"testVolume", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+	}
+	_, err := d.DeleteVolume(context.Background(), req)
+	require.NoError(t, err)
+}
+
+func TestDeleteVolume_SuccessNoFsName(t *testing.T) {
+	d := NewFakeDriver()
+	req := &csi.DeleteVolumeRequest{
+		VolumeId: fmt.Sprintf(volumeIDTemplate,
+			"testVolume", "", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
 	require.NoError(t, err)
@@ -998,14 +1063,10 @@ func TestParseAmlfilesystemProperties_Success(t *testing.T) {
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
+		"sku-name":                "AMLFS-Durable-Premium-40",
 		"identities":              "identity1,identity2",
 		"tags":                    "key1=value1,key2=value2",
 		"zones":                   "zone1,zone2,",
-		"root-squash-mode":        "RootOnly",
-		"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
-		"root-squash-uid":         "1000",
-		"root-squash-gid":         "2000",
 	}
 
 	expected := &AmlFilesystemProperties{
@@ -1014,7 +1075,7 @@ func TestParseAmlfilesystemProperties_Success(t *testing.T) {
 		Location:             "test-location",
 		MaintenanceDayOfWeek: "Monday",
 		TimeOfDayUTC:         "12:00",
-		SKUName:              "Standard",
+		SKUName:              "AMLFS-Durable-Premium-40",
 		Identities:           []string{"identity1", "identity2"},
 		Tags:                 map[string]string{"key1": "value1", "key2": "value2"},
 		Zones:                []string{"zone1", "zone2"},
@@ -1022,12 +1083,6 @@ func TestParseAmlfilesystemProperties_Success(t *testing.T) {
 			VnetResourceGroup: "test-vnet-rg",
 			VnetName:          "test-vnet-name",
 			SubnetName:        "test-subnet-name",
-		},
-		RootSquashSettings: &RootSquashSettings{
-			SquashMode:       armstoragecache.AmlFilesystemSquashModeRootOnly,
-			NoSquashNidLists: "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
-			SquashUID:        1000,
-			SquashGID:        2000,
 		},
 	}
 
@@ -1047,7 +1102,7 @@ func TestParseAmlfilesystemProperties_Err_InvalidParameters(t *testing.T) {
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
+		"sku-name":                "AMLFS-Durable-Premium-40",
 		"zones":                   "zone1,zone2",
 	}
 
@@ -1060,183 +1115,6 @@ func TestParseAmlfilesystemProperties_Err_InvalidParameters(t *testing.T) {
 	require.ErrorContains(t, err, "invalid-param")
 }
 
-func TestParseAmlfilesystemProperties_Err_EmptyRootSquashMode(t *testing.T) {
-	properties := map[string]string{
-		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
-		"location":                "test-location",
-		"vnet-resource-group":     "test-vnet-rg",
-		"vnet-name":               "test-vnet-name",
-		"subnet-name":             "test-subnet-name",
-		"maintenance-day-of-week": "Monday",
-		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
-		"zones":                   "zone1,zone2",
-		"root-squash-mode":        "",
-		"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
-		"root-squash-uid":         "1000",
-		"root-squash-gid":         "2000",
-	}
-
-	_, err := parseAmlFilesystemProperties(properties)
-	require.Error(t, err)
-	grpcStatus, ok := status.FromError(err)
-	assert.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	require.ErrorContains(t, err, "root-squash-mode must be one of")
-}
-
-func TestParseAmlfilesystemProperties_Err_InvalidRootSquashMode(t *testing.T) {
-	properties := map[string]string{
-		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
-		"location":                "test-location",
-		"vnet-resource-group":     "test-vnet-rg",
-		"vnet-name":               "test-vnet-name",
-		"subnet-name":             "test-subnet-name",
-		"maintenance-day-of-week": "Monday",
-		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
-		"zones":                   "zone1,zone2",
-		"root-squash-mode":        "invalidMode",
-		"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
-		"root-squash-uid":         "1000",
-		"root-squash-gid":         "2000",
-	}
-
-	_, err := parseAmlFilesystemProperties(properties)
-	require.Error(t, err)
-	grpcStatus, ok := status.FromError(err)
-	assert.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	require.ErrorContains(t, err, "root-squash-mode must be one of")
-}
-
-func TestParseAmlfilesystemProperties_Err_InvalidRootSquashNidLists(t *testing.T) {
-	properties := map[string]string{
-		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
-		"location":                "test-location",
-		"vnet-resource-group":     "test-vnet-rg",
-		"vnet-name":               "test-vnet-name",
-		"subnet-name":             "test-subnet-name",
-		"maintenance-day-of-week": "Monday",
-		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
-		"zones":                   "zone1,zone2",
-		"root-squash-mode":        "RootOnly",
-		"root-squash-nid-lists":   "invalidIPs",
-		"root-squash-uid":         "1000",
-		"root-squash-gid":         "2000",
-	}
-
-	_, err := parseAmlFilesystemProperties(properties)
-	require.Error(t, err)
-	grpcStatus, ok := status.FromError(err)
-	assert.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	require.ErrorContains(t, err, "root-squash-nid-lists must be in the form")
-}
-
-func TestParseAmlfilesystemProperties_Err_InvalidRootSquashUid(t *testing.T) {
-	properties := map[string]string{
-		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
-		"location":                "test-location",
-		"vnet-resource-group":     "test-vnet-rg",
-		"vnet-name":               "test-vnet-name",
-		"subnet-name":             "test-subnet-name",
-		"maintenance-day-of-week": "Monday",
-		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
-		"zones":                   "zone1,zone2",
-		"root-squash-mode":        "RootOnly",
-		"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
-		"root-squash-uid":         "0",
-		"root-squash-gid":         "2000",
-	}
-
-	_, err := parseAmlFilesystemProperties(properties)
-	require.Error(t, err)
-	grpcStatus, ok := status.FromError(err)
-	assert.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	require.ErrorContains(t, err, "root-squash-uid value must be number between 1 and 4294967295")
-}
-
-func TestParseAmlfilesystemProperties_Err_InvalidRootSquashGid(t *testing.T) {
-	properties := map[string]string{
-		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
-		"location":                "test-location",
-		"vnet-resource-group":     "test-vnet-rg",
-		"vnet-name":               "test-vnet-name",
-		"subnet-name":             "test-subnet-name",
-		"maintenance-day-of-week": "Monday",
-		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
-		"zones":                   "zone1,zone2",
-		"root-squash-mode":        "RootOnly",
-		"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
-		"root-squash-uid":         "1000",
-		"root-squash-gid":         "a",
-	}
-
-	_, err := parseAmlFilesystemProperties(properties)
-	require.Error(t, err)
-	grpcStatus, ok := status.FromError(err)
-	assert.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	require.ErrorContains(t, err, "root-squash-gid value must be number between 1 and 4294967295")
-}
-
-func TestParseAmlfilesystemProperties_Err_MissingRootSquashProperties(t *testing.T) {
-	rootSquashModes := []string{
-		string(armstoragecache.AmlFilesystemSquashModeNone),
-		string(armstoragecache.AmlFilesystemSquashModeRootOnly),
-		string(armstoragecache.AmlFilesystemSquashModeAll),
-	}
-	missingProperties := []string{"root-squash-nid-lists", "root-squash-uid", "root-squash-gid"}
-	expectedErr := []bool{false, true, true}
-
-	for idx, rootSquashMode := range rootSquashModes {
-		for _, missingProperty := range missingProperties {
-			t.Run(rootSquashMode+"-"+missingProperty, func(t *testing.T) {
-				properties := map[string]string{
-					"resource-group-name":     "test-resource-group",
-					"amlfilesystem-name":      "test-filesystem",
-					"location":                "test-location",
-					"vnet-resource-group":     "test-vnet-rg",
-					"vnet-name":               "test-vnet-name",
-					"subnet-name":             "test-subnet-name",
-					"maintenance-day-of-week": "Monday",
-					"time-of-day-utc":         "12:00",
-					"sku-name":                "Standard",
-					"zones":                   "zone1,zone2",
-					"root-squash-nid-lists":   "10.1.3.[7-9]@tcp;10.1.3.10@tcp",
-					"root-squash-uid":         "1000",
-					"root-squash-gid":         "2000",
-				}
-
-				properties["root-squash-mode"] = rootSquashMode
-				delete(properties, missingProperty)
-
-				_, err := parseAmlFilesystemProperties(properties)
-				if expectedErr[idx] {
-					require.Error(t, err)
-					grpcStatus, ok := status.FromError(err)
-					assert.True(t, ok)
-					assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-					require.ErrorContains(t, err, "invalid root squash info")
-					require.ErrorContains(t, err, missingProperty)
-				} else {
-					require.NoError(t, err)
-				}
-			})
-		}
-	}
-}
-
 func TestParseAmlfilesystemProperties_Err_MissingMaintenanceDayOfWeek(t *testing.T) {
 	properties := map[string]string{
 		"resource-group-name": "test-resource-group",
@@ -1246,7 +1124,7 @@ func TestParseAmlfilesystemProperties_Err_MissingMaintenanceDayOfWeek(t *testing
 		"vnet-name":           "test-vnet-name",
 		"subnet-name":         "test-subnet-name",
 		"time-of-day-utc":     "12:00",
-		"sku-name":            "Standard",
+		"sku-name":            "AMLFS-Durable-Premium-40",
 		"zones":               "zone1,zone2",
 	}
 
@@ -1268,7 +1146,7 @@ func TestParseAmlfilesystemProperties_Err_EmptyMaintenanceDayOfWeek(t *testing.T
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "",
 		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
+		"sku-name":                "AMLFS-Durable-Premium-40",
 		"zones":                   "zone1,zone2",
 	}
 
@@ -1290,7 +1168,7 @@ func TestParseAmlfilesystemProperties_Err_InvalidMaintenanceDayOfWeek(t *testing
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "invalid-day-of-week",
 		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
+		"sku-name":                "AMLFS-Durable-Premium-40",
 		"zones":                   "zone1,zone2",
 	}
 
@@ -1311,7 +1189,7 @@ func TestParseAmlfilesystemProperties_Err_MissingTimeOfDay(t *testing.T) {
 		"vnet-name":               "test-vnet-name",
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
-		"sku-name":                "Standard",
+		"sku-name":                "AMLFS-Durable-Premium-40",
 		"zones":                   "zone1,zone2",
 	}
 
@@ -1321,6 +1199,27 @@ func TestParseAmlfilesystemProperties_Err_MissingTimeOfDay(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
 	require.ErrorContains(t, err, "time-of-day-utc must be provided")
+}
+
+func TestParseAmlfilesystemProperties_Err_MissingSku(t *testing.T) {
+	properties := map[string]string{
+		"resource-group-name":     "test-resource-group",
+		"amlfilesystem-name":      "test-filesystem",
+		"location":                "test-location",
+		"vnet-resource-group":     "test-vnet-rg",
+		"vnet-name":               "test-vnet-name",
+		"subnet-name":             "test-subnet-name",
+		"maintenance-day-of-week": "Monday",
+		"time-of-day-utc":         "12:00",
+		"zones":                   "zone1,zone2",
+	}
+
+	_, err := parseAmlFilesystemProperties(properties)
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "sku-name must be provided")
 }
 
 func TestParseAmlfilesystemProperties_Err_InvalidTimeOfDay(t *testing.T) {
@@ -1333,7 +1232,7 @@ func TestParseAmlfilesystemProperties_Err_InvalidTimeOfDay(t *testing.T) {
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "11",
-		"sku-name":                "Standard",
+		"sku-name":                "AMLFS-Durable-Premium-40",
 		"zones":                   "zone1,zone2",
 	}
 
@@ -1355,7 +1254,7 @@ func TestParseAmlfilesystemProperties_Err_MissingZones(t *testing.T) {
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
+		"sku-name":                "AMLFS-Durable-Premium-40",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1376,7 +1275,7 @@ func TestParseAmlfilesystemProperties_Err_InvalidTags(t *testing.T) {
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "12:00",
-		"sku-name":                "Standard",
+		"sku-name":                "AMLFS-Durable-Premium-40",
 		"zones":                   "zone1,zone2",
 		"tags":                    "key1:value1,=value2",
 	}
@@ -1456,92 +1355,69 @@ func TestValidateAndPrependVolumeName(t *testing.T) {
 
 func TestRoundToAmlfsBlockSizeForSku(t *testing.T) {
 	d := NewFakeDriver()
-	d.lustreSkuValues = map[string]lustreSkuValue{
-		"Standard": {
-			IncrementInTib: laaSOBlockSizeInBytes / util.TiB,
-			MaximumInTib:   10 * laaSOBlockSizeInBytes / util.TiB,
-		},
-		"Premium": {
-			IncrementInTib: 2 * laaSOBlockSizeInBytes / util.TiB,
-			MaximumInTib:   20 * laaSOBlockSizeInBytes / util.TiB,
-		},
-	}
+	laaSOBlockSizeInBytes := int64(defaultLaaSOBlockSizeInTib) * util.TiB
 
 	tests := []struct {
-		desc            string
-		capacityInBytes int64
-		sku             string
-		expected        int64
-		expectError     bool
+		desc               string
+		capacityInBytes    int64
+		blockSizeInBytes   int64
+		maxCapacityInBytes int64
+		expected           int64
+		expectError        bool
 	}{
 		{
-			desc:            "default size",
-			capacityInBytes: 0,
-			sku:             "",
-			expected:        defaultSizeInBytes,
-			expectError:     false,
+			desc:        "default size",
+			expected:    defaultSizeInBytes,
+			expectError: false,
 		},
 		{
-			desc:            "round up to Standard block size",
-			capacityInBytes: laaSOBlockSizeInBytes - 1,
-			sku:             "Standard",
-			expected:        laaSOBlockSizeInBytes,
-			expectError:     false,
+			desc:             "round up to block size",
+			capacityInBytes:  laaSOBlockSizeInBytes - 1,
+			blockSizeInBytes: laaSOBlockSizeInBytes,
+			expected:         laaSOBlockSizeInBytes,
+			expectError:      false,
 		},
 		{
-			desc:            "exact Standard block size",
-			capacityInBytes: laaSOBlockSizeInBytes,
-			sku:             "Standard",
-			expected:        laaSOBlockSizeInBytes,
-			expectError:     false,
+			desc:             "exact block size",
+			capacityInBytes:  laaSOBlockSizeInBytes,
+			blockSizeInBytes: laaSOBlockSizeInBytes,
+			expected:         laaSOBlockSizeInBytes,
+			expectError:      false,
 		},
 		{
-			desc:            "round up to next Standard block size",
-			capacityInBytes: laaSOBlockSizeInBytes + 1,
-			sku:             "Standard",
-			expected:        2 * laaSOBlockSizeInBytes,
-			expectError:     false,
+			desc:             "round up to next block size",
+			capacityInBytes:  laaSOBlockSizeInBytes + 1,
+			blockSizeInBytes: laaSOBlockSizeInBytes,
+			expected:         2 * laaSOBlockSizeInBytes,
+			expectError:      false,
 		},
 		{
-			desc:            "round up to Premium block size",
-			capacityInBytes: 2*laaSOBlockSizeInBytes - 1,
-			sku:             "Premium",
-			expected:        2 * laaSOBlockSizeInBytes,
-			expectError:     false,
+			desc:             "round up to larger block size",
+			capacityInBytes:  2*laaSOBlockSizeInBytes - 1,
+			blockSizeInBytes: laaSOBlockSizeInBytes,
+			expected:         2 * laaSOBlockSizeInBytes,
+			expectError:      false,
 		},
 		{
-			desc:            "exceeds maximum capacity for Standard",
-			capacityInBytes: 11 * laaSOBlockSizeInBytes,
-			sku:             "Standard",
-			expected:        0,
-			expectError:     true,
+			desc:               "exceeds maximum capacity",
+			capacityInBytes:    2 * laaSOBlockSizeInBytes,
+			blockSizeInBytes:   laaSOBlockSizeInBytes,
+			maxCapacityInBytes: laaSOBlockSizeInBytes,
+			expected:           0,
+			expectError:        true,
 		},
 		{
-			desc:            "exceeds maximum capacity for Premium",
-			capacityInBytes: 21 * laaSOBlockSizeInBytes,
-			sku:             "Premium",
-			expected:        0,
-			expectError:     true,
-		},
-		{
-			desc:            "capacity overflow",
-			capacityInBytes: math.MaxInt64,
-			sku:             "Premium",
-			expected:        0,
-			expectError:     true,
-		},
-		{
-			desc:            "invalid SKU",
-			capacityInBytes: laaSOBlockSizeInBytes,
-			sku:             "InvalidSKU",
-			expected:        0,
-			expectError:     true,
+			desc:             "capacity overflow",
+			capacityInBytes:  math.MaxInt64,
+			blockSizeInBytes: math.MaxInt64 - 1,
+			expected:         0,
+			expectError:      true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
-			result, err := d.roundToAmlfsBlockSizeForSku(test.capacityInBytes, test.sku)
+			result, err := d.roundToAmlfsBlockSize(test.capacityInBytes, test.blockSizeInBytes, test.maxCapacityInBytes)
 			if test.expectError {
 				require.Error(t, err)
 			} else {

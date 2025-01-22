@@ -9,7 +9,7 @@ parameters:
   #  "${pvc.metadata.name}"
   #  "${pvc.metadata.namespace}"
   #  "${pv.metadata.name}"
-  amlfilesystem-name: "davidbradley-amlfs-${pvc.metadata.name}"
+  amlfilesystem-name: "davidbradley-amlfs"
   # location to create the AMLFS cluster
   location: eastus2 # defaults to AKS location
   # vnet resource group the AMLFS cluster will use
@@ -30,10 +30,6 @@ parameters:
   tags: "owner=davidbradley"
   # resource-group-name: davidbradley-amlfs-rg # defaults to AKS resource group
   # identities: "identity1,identity2"
-  # root-squash-mode: RootOnly
-  # root-squash-nid-lists: "10.1.3.[7-9]@tcp;10.1.3.10@tcp"
-  # root-squash-uid: "1000"
-  # root-squash-gid: "2000"
 provisioner: azurelustre.csi.azure.com
 # Azure Lustre Cluster is removed after PVC deletion if reclaimPolicy is the default value "Delete".
 reclaimPolicy: Delete

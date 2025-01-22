@@ -209,16 +209,18 @@ func TestNodePublishVolume(t *testing.T) {
 			expectedMountActions: []mount.FakeAction{},
 		},
 		{
-			desc: "FS name missing",
+			desc: "Valid request without lustre fs name",
 			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
-				VolumeId:         "vol_1##1.1.1.1",
-				TargetPath:       targetTest,
-				VolumeContext:    map[string]string{"mgs-ip-address": "1.1.1.1"},
+				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
+					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
+				}},
+				VolumeId:      "vol_1##1.1.1.1",
+				TargetPath:    targetTest,
+				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1"},
 			},
-			expectedErr:          status.Error(codes.InvalidArgument, "Context fs-name must be provided"),
-			expectedMountpoints:  nil,
-			expectedMountActions: []mount.FakeAction{},
+			expectedErr:          nil,
+			expectedMountpoints:  []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs", Path: "target_test", Type: "lustre", Opts: []string{"noatime", "flock"}}},
+			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"}},
 		},
 		{
 			desc: "Valid request with old ID",
@@ -304,14 +306,14 @@ func TestNodePublishVolume(t *testing.T) {
 			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs", FSType: "lustre"}},
 		},
 		{
-			desc: "Valid mount options, no sub-dir",
+			desc: "Valid mount options with dynamic provisioning",
 			req: csi.NodePublishVolumeRequest{
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1#",
+				VolumeId:      "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-name#test-amlfilesystem-rg",
 				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs"},
+				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "amlfilesystem-name": "test-amlfilesystem-name", "resource-group-name": "test-amlfilesystem-rg"},
 				Readonly:      false,
 			},
 			expectedErr:          nil,
@@ -374,21 +376,6 @@ func TestNodePublishVolume(t *testing.T) {
 				{Action: "unmount", Target: workingMountDir + "/target_test", Source: "", FSType: ""},
 				{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs/testSubDir", FSType: "lustre"},
 			},
-		},
-		{
-			desc: "Valid mount options with readonly",
-			req: csi.NodePublishVolumeRequest{
-				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
-					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
-				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1#testSubDir",
-				TargetPath:    targetTest,
-				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "sub-dir": subDir},
-				Readonly:      true,
-			},
-			expectedErr:          nil,
-			expectedMountpoints:  []mount.MountPoint{{Device: "1.1.1.1@tcp:/lustrefs/testSubDir", Path: "target_test", Type: "lustre", Opts: []string{"ro", "noatime", "flock"}}},
-			expectedMountActions: []mount.FakeAction{{Action: "mount", Target: "target_test", Source: "1.1.1.1@tcp:/lustrefs/testSubDir", FSType: "lustre"}},
 		},
 		{
 			desc: "Valid mount options with metadata",
@@ -1047,6 +1034,26 @@ func TestNewLustreVolume(t *testing.T) {
 				azureLustreName: "lustrefs",
 				mgsIPAddress:    "1.1.1.1",
 				subDir:          "",
+			},
+		},
+		{
+			desc:    "valid context with dynamic provisioning",
+			id:      "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-name#test-amlfilesystem-rg",
+			volName: "vol_1",
+			params: map[string]string{
+				"mgs-ip-address":      "1.1.1.1",
+				"fs-name":             "lustrefs",
+				"amlfilesystem-name":  "test-amlfilesystem-name",
+				"resource-group-name": "test-amlfilesystem-rg",
+			},
+			expectedLustreVolume: &lustreVolume{
+				id:                "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-name#test-amlfilesystem-rg",
+				name:              "vol_1",
+				azureLustreName:   "lustrefs",
+				mgsIPAddress:      "1.1.1.1",
+				subDir:            "",
+				amlFilesystemName: "test-amlfilesystem-name",
+				resourceGroupName: "test-amlfilesystem-rg",
 			},
 		},
 		{

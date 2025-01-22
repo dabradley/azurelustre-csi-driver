@@ -84,6 +84,13 @@ var (
 		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
 		csi.NodeServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
 	}
+
+	DefaultSkuValues = map[string]*LustreSkuValue{
+		"AMLFS-Durable-Premium-40":  {IncrementInTib: 48, MaximumInTib: 768},
+		"AMLFS-Durable-Premium-125": {IncrementInTib: 16, MaximumInTib: 128},
+		"AMLFS-Durable-Premium-250": {IncrementInTib: 8, MaximumInTib: 128},
+		"AMLFS-Durable-Premium-500": {IncrementInTib: 4, MaximumInTib: 128},
+	}
 )
 
 type lustreVolume struct {
@@ -105,8 +112,8 @@ type DriverOptions struct {
 	WorkingMountDir              string
 }
 
-// lustreSkuValue describes the increment and maximum size of a given Lustre sku
-type lustreSkuValue struct {
+// LustreSkuValue describes the increment and maximum size of a given Lustre sku
+type LustreSkuValue struct {
 	IncrementInTib int64
 	MaximumInTib   int64
 }
@@ -134,7 +141,6 @@ type Driver struct {
 	cloud              *azure.Cloud
 	resourceGroup      string
 	location           string
-	lustreSkuValues    map[string]lustreSkuValue
 	dynamicProvisioner DynamicProvisionerInterface
 }
 
@@ -173,6 +179,7 @@ func NewDriver(options *DriverOptions) *Driver {
 		if d.enableAzureLustreMockDynProv {
 			klog.V(2).Infof("no cloud config provided, driver running with mock dynamic provisioning")
 			d.dynamicProvisioner = &DynamicProvisioner{}
+			d.cloud = az
 		} else {
 			klog.Fatalf("no cloud config provided, error")
 		}
@@ -217,12 +224,15 @@ func NewDriver(options *DriverOptions) *Driver {
 			klog.Warningf("failed to create network client factory: %v", err)
 		}
 		vnetClient := networkClientFactory.NewVirtualNetworksClient()
+		skusClient := storageClientFactory.NewSKUsClient()
 		mgmtClient := storageClientFactory.NewManagementClient()
 		amlFilesystemsClient := storageClientFactory.NewAmlFilesystemsClient()
 		d.dynamicProvisioner = &DynamicProvisioner{
 			amlFilesystemsClient: amlFilesystemsClient,
 			mgmtClient:           mgmtClient,
 			vnetClient:           vnetClient,
+			skusClient:           skusClient,
+			defaultSkuValues:     DefaultSkuValues,
 		}
 	}
 
@@ -287,13 +297,6 @@ func (d *Driver) Run(endpoint string, testBool bool) {
 	d.AddVolumeCapabilityAccessModes(volumeCapabilities)
 	d.AddNodeServiceCapabilities(nodeServiceCapabilities)
 
-	d.lustreSkuValues = map[string]lustreSkuValue{
-		"AMLFS-Durable-Premium-40":  {IncrementInTib: 48, MaximumInTib: 768},
-		"AMLFS-Durable-Premium-125": {IncrementInTib: 16, MaximumInTib: 128},
-		"AMLFS-Durable-Premium-250": {IncrementInTib: 8, MaximumInTib: 128},
-		"AMLFS-Durable-Premium-500": {IncrementInTib: 4, MaximumInTib: 128},
-	}
-
 	s := csicommon.NewNonBlockingGRPCServer()
 	// Driver d act as IdentityServer, ControllerServer and NodeServer
 	s.Start(endpoint, d, d, d, testBool)
@@ -315,7 +318,7 @@ func getLustreVolFromID(id string) (*lustreVolume, error) {
 	vol := &lustreVolume{
 		name:            name,
 		id:              id,
-		azureLustreName: strings.Trim(segments[1], "/"),
+		azureLustreName: DefaultLustreFsName,
 		mgsIPAddress:    segments[2],
 	}
 

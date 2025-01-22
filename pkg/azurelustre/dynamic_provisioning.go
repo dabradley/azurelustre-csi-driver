@@ -2,9 +2,13 @@ package azurelustre
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
@@ -14,18 +18,91 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	AmlfsSkuResourceType          = "amlFilesystems"
+	AmlfsSkuCapacityIncrementName = "OSS capacity increment (TiB)"
+	AmlfsSkuCapacityMaximumName   = "default maximum capacity (TiB)"
+)
+
 type DynamicProvisionerInterface interface {
 	DeleteAmlFilesystem(ctx context.Context, resourceGroupName, amlFilesystemName string) error
 	CreateAmlFilesystem(ctx context.Context, amlFilesystemProperties *AmlFilesystemProperties) (string, error)
 	ClusterExists(ctx context.Context, resourceGroupName, amlFilesystemName string) (bool, error)
+	GetSkuValuesForLocation(ctx context.Context, location string) map[string]*LustreSkuValue
 }
 
 type DynamicProvisioner struct {
 	DynamicProvisionerInterface
 	amlFilesystemsClient *armstoragecache.AmlFilesystemsClient
 	mgmtClient           *armstoragecache.ManagementClient
+	skusClient           *armstoragecache.SKUsClient
 	vnetClient           *armnetwork.VirtualNetworksClient
+	defaultSkuValues     map[string]*LustreSkuValue
 	pollFrequency        time.Duration
+}
+
+func convertHTTPResponseErrorToGrpcCodeError(err error) error {
+	klog.Errorf("converting error: %#v", err)
+
+	if err == nil {
+		return nil
+	}
+
+	_, ok := status.FromError(err)
+	if ok {
+		klog.V(2).Infof("error is already GRPC error: %v", err)
+		return err
+	}
+
+	var httpError *azcore.ResponseError
+	if !errors.As(err, &httpError) {
+		klog.Errorf("error is not a response error: %v", err)
+		return status.Errorf(codes.Unknown, "error occurred calling API: %v", err)
+	}
+
+	klog.Errorf("converted error: %#v", httpError)
+
+	statusCode := httpError.StatusCode
+
+	var grpcErrorCode codes.Code
+	if statusCode >= 400 && statusCode < 500 {
+		switch statusCode {
+		case http.StatusBadRequest:
+			grpcErrorCode = codes.InvalidArgument
+		case http.StatusConflict:
+			if strings.Contains(err.Error(), "Operation results in exceeding quota limits of resource type AmlFilesystem") {
+				grpcErrorCode = codes.ResourceExhausted
+			} else {
+				grpcErrorCode = codes.InvalidArgument
+			}
+		case http.StatusNotFound:
+			grpcErrorCode = codes.NotFound
+		case http.StatusForbidden:
+			grpcErrorCode = codes.PermissionDenied
+		case http.StatusUnauthorized:
+			grpcErrorCode = codes.Unauthenticated
+		case http.StatusTooManyRequests:
+			grpcErrorCode = codes.Unavailable
+		default:
+			grpcErrorCode = codes.InvalidArgument
+		}
+	} else if statusCode >= 500 {
+		switch statusCode {
+		case http.StatusInternalServerError:
+			grpcErrorCode = codes.Internal
+		case http.StatusBadGateway:
+			grpcErrorCode = codes.Unavailable
+		case http.StatusServiceUnavailable:
+			grpcErrorCode = codes.Unavailable
+		case http.StatusGatewayTimeout:
+			grpcErrorCode = codes.DeadlineExceeded
+		default:
+			// Prefer to default to Unknown rather than Internal so provisioner will retry
+			grpcErrorCode = codes.Unknown
+		}
+	}
+
+	return status.Errorf(grpcErrorCode, "error occurred calling API: %v", httpError)
 }
 
 func (d *DynamicProvisioner) ClusterExists(ctx context.Context, resourceGroupName, amlFilesystemName string) (bool, error) {
@@ -41,7 +118,7 @@ func (d *DynamicProvisioner) ClusterExists(ctx context.Context, resourceGroupNam
 		}
 
 		klog.V(2).Infof("error when retrieving the aml filesystem: %v", err)
-		return false, err
+		return false, convertHTTPResponseErrorToGrpcCodeError(err)
 	}
 	klog.V(2).Infof("response when retrieving the aml filesystem: %#v", resp)
 	return true, nil
@@ -52,13 +129,10 @@ func (d *DynamicProvisioner) DeleteAmlFilesystem(ctx context.Context, resourceGr
 		return status.Error(codes.Internal, "aml filesystem client is nil")
 	}
 
-	exists, err := d.ClusterExists(ctx, resourceGroupName, amlFilesystemName)
-	klog.V(2).Infof("exists: %v, err: %v", exists, err)
-
 	poller, err := d.amlFilesystemsClient.BeginDelete(ctx, resourceGroupName, amlFilesystemName, nil)
 	if err != nil {
 		klog.Warningf("failed to finish the request: %v", err)
-		return err
+		return convertHTTPResponseErrorToGrpcCodeError(err)
 	}
 
 	pollerOptions := &runtime.PollUntilDoneOptions{
@@ -67,7 +141,7 @@ func (d *DynamicProvisioner) DeleteAmlFilesystem(ctx context.Context, resourceGr
 	res, err := poller.PollUntilDone(ctx, pollerOptions)
 	if err != nil {
 		klog.Warningf("failed to poll the result: %v", err)
-		return err
+		return convertHTTPResponseErrorToGrpcCodeError(err)
 	}
 	klog.V(2).Infof("response to dyn: %v", res)
 
@@ -113,16 +187,6 @@ func (d *DynamicProvisioner) CreateAmlFilesystem(ctx context.Context, amlFilesys
 		},
 		StorageCapacityTiB: to.Ptr[float32](amlFilesystemProperties.StorageCapacityTiB),
 	}
-	if amlFilesystemProperties.RootSquashSettings != nil {
-		properties.RootSquashSettings = &armstoragecache.AmlFilesystemRootSquashSettings{
-			Mode: to.Ptr(amlFilesystemProperties.RootSquashSettings.SquashMode),
-		}
-		if amlFilesystemProperties.RootSquashSettings.SquashMode != armstoragecache.AmlFilesystemSquashModeNone {
-			properties.RootSquashSettings.NoSquashNidLists = to.Ptr(amlFilesystemProperties.RootSquashSettings.NoSquashNidLists)
-			properties.RootSquashSettings.SquashUID = to.Ptr(amlFilesystemProperties.RootSquashSettings.SquashUID)
-			properties.RootSquashSettings.SquashGID = to.Ptr(amlFilesystemProperties.RootSquashSettings.SquashGID)
-		}
-	}
 	amlFilesystem := armstoragecache.AmlFilesystem{
 		Location:   to.Ptr(amlFilesystemProperties.Location),
 		Tags:       tags,
@@ -167,8 +231,7 @@ func (d *DynamicProvisioner) CreateAmlFilesystem(ctx context.Context, amlFilesys
 		amlFilesystem,
 		nil)
 	if err != nil {
-		klog.Warningf("failed to finish the request: %v", err)
-		return "", err
+		return "", convertHTTPResponseErrorToGrpcCodeError(err)
 	}
 
 	pollerOptions := &runtime.PollUntilDoneOptions{
@@ -177,7 +240,7 @@ func (d *DynamicProvisioner) CreateAmlFilesystem(ctx context.Context, amlFilesys
 	res, err := poller.PollUntilDone(ctx, pollerOptions)
 	if err != nil {
 		klog.Warningf("failed to poll the result: %v", err)
-		return "", err
+		return "", convertHTTPResponseErrorToGrpcCodeError(err)
 	}
 
 	klog.V(2).Infof("response to dyn: %v", res)
@@ -185,8 +248,94 @@ func (d *DynamicProvisioner) CreateAmlFilesystem(ctx context.Context, amlFilesys
 	return mgsAddress, nil
 }
 
-func getAmlfsSubnetSize(ctx context.Context, sku string, clusterSize float32, mgmtClient *armstoragecache.ManagementClient) (int, error) {
-	reqSize, err := mgmtClient.GetRequiredAmlFSSubnetsSize(ctx, &armstoragecache.ManagementClientGetRequiredAmlFSSubnetsSizeOptions{
+func (d *DynamicProvisioner) GetSkuValuesForLocation(ctx context.Context, location string) map[string]*LustreSkuValue {
+	if d.skusClient == nil {
+		klog.Warning("skus client is nil, using defaults")
+		return d.defaultSkuValues
+	}
+
+	skusPager := d.skusClient.NewListPager(nil)
+	skuValues := make(map[string]*LustreSkuValue)
+
+	var amlfsSkus []*armstoragecache.ResourceSKU
+	var skusForLocation []*armstoragecache.ResourceSKU
+
+	for skusPager.More() {
+		page, err := skusPager.NextPage(ctx)
+		if err != nil {
+			klog.Warningf("error getting SKUs for location %s, using defaults: %v", location, err)
+			return d.defaultSkuValues
+		}
+
+		for _, sku := range page.Value {
+			if *sku.ResourceType == AmlfsSkuResourceType {
+				amlfsSkus = append(amlfsSkus, sku)
+			}
+		}
+	}
+
+	if len(amlfsSkus) == 0 {
+		klog.Warning("no AMLFS SKUs found, using defaults")
+		return d.defaultSkuValues
+	}
+
+	for _, sku := range amlfsSkus {
+		for _, skuLocation := range sku.Locations {
+			if strings.EqualFold(*skuLocation, location) {
+				skusForLocation = append(skusForLocation, sku)
+			}
+		}
+	}
+
+	if len(skusForLocation) == 0 {
+		klog.Warningf("found no AMLFS SKUs for location %s, using defaults", location)
+		return d.defaultSkuValues
+	}
+
+	for _, sku := range skusForLocation {
+		var incrementInTib int64
+		var maximumInTib int64
+		for _, capability := range sku.Capabilities {
+			if *capability.Name == AmlfsSkuCapacityIncrementName {
+				parsedValue, err := strconv.ParseInt(*capability.Value, 10, 64)
+				if err != nil {
+					klog.Warningf("failed to parse capability value: %v", err)
+					continue
+				}
+				incrementInTib = parsedValue
+			} else if *capability.Name == AmlfsSkuCapacityMaximumName {
+				parsedValue, err := strconv.ParseInt(*capability.Value, 10, 64)
+				if err != nil {
+					klog.Warningf("failed to parse capability value: %v", err)
+					continue
+				}
+				maximumInTib = parsedValue
+			}
+		}
+		if incrementInTib != 0 && maximumInTib != 0 {
+			skuValues[*sku.Name] = &LustreSkuValue{
+				IncrementInTib: incrementInTib,
+				MaximumInTib:   maximumInTib,
+			}
+			klog.Warningf("Adding sku value %s for location %s: %#v", *sku.Name, location, *skuValues[*sku.Name])
+		}
+	}
+
+	if len(skuValues) == 0 {
+		klog.Warningf("found no AMLFS SKUs for location %s, using defaults", location)
+		return d.defaultSkuValues
+	}
+
+	klog.Warningf("Found SKU values for location %s: %#v", location, skuValues)
+	return skuValues
+}
+
+func (d *DynamicProvisioner) getAmlfsSubnetSize(ctx context.Context, sku string, clusterSize float32) (int, error) {
+	if d.mgmtClient == nil {
+		return 0, status.Error(codes.Internal, "storage management client is nil")
+	}
+
+	reqSize, err := d.mgmtClient.GetRequiredAmlFSSubnetsSize(ctx, &armstoragecache.ManagementClientGetRequiredAmlFSSubnetsSizeOptions{
 		RequiredAMLFilesystemSubnetsSizeInfo: &armstoragecache.RequiredAmlFilesystemSubnetsSizeInfo{
 			SKU: &armstoragecache.SKUName{
 				Name: to.Ptr(sku),
@@ -195,14 +344,17 @@ func getAmlfsSubnetSize(ctx context.Context, sku string, clusterSize float32, mg
 		},
 	})
 	if err != nil {
-		return 0, err
+		return 0, convertHTTPResponseErrorToGrpcCodeError(err)
 	}
 
 	return int(*reqSize.RequiredAmlFilesystemSubnetsSize.FilesystemSubnetSize), nil
 }
 
-func checkSubnetAddresses(ctx context.Context, vnetResourceGroup, vnetName, subnetID string, vnetClient *armnetwork.VirtualNetworksClient) (int, error) {
-	usagesPager := vnetClient.NewListUsagePager(vnetResourceGroup, vnetName, nil)
+func (d *DynamicProvisioner) checkSubnetAddresses(ctx context.Context, vnetResourceGroup, vnetName, subnetID string) (int, error) {
+	if d.vnetClient == nil {
+		return 0, status.Error(codes.Internal, "vnet client is nil")
+	}
+	usagesPager := d.vnetClient.NewListUsagePager(vnetResourceGroup, vnetName, nil)
 
 	klog.V(2).Infof("got pager for: %s, %s", vnetResourceGroup, vnetName)
 
@@ -211,17 +363,16 @@ func checkSubnetAddresses(ctx context.Context, vnetResourceGroup, vnetName, subn
 		page, err := usagesPager.NextPage(ctx)
 		if err != nil {
 			klog.Errorf("error getting next page: %v", err)
-			return 0, err
+			return 0, convertHTTPResponseErrorToGrpcCodeError(err)
 		}
 
-		klog.V(2).Infof("got page: %v", page)
-		for i := range page.Value {
-			klog.V(2).Infof("checking subnet: %s", *page.Value[i].ID)
-			currentSubnet := page.Value[i]
-			if *currentSubnet.ID == subnetID {
-				klog.V(2).Infof("found subnet: %s", *currentSubnet.ID)
-				usedIPs := *currentSubnet.CurrentValue
-				limitIPs := *currentSubnet.Limit
+		klog.V(2).Infof("got page: %#v", page)
+		for _, usageValue := range page.Value {
+			klog.V(2).Infof("checking subnet: %s", *usageValue.ID)
+			if *usageValue.ID == subnetID {
+				klog.V(2).Infof("found subnet: %s", *usageValue.ID)
+				usedIPs := *usageValue.CurrentValue
+				limitIPs := *usageValue.Limit
 				availableIPs := int(limitIPs) - int(usedIPs)
 				return availableIPs, nil
 			}
@@ -232,22 +383,22 @@ func checkSubnetAddresses(ctx context.Context, vnetResourceGroup, vnetName, subn
 }
 
 func (d *DynamicProvisioner) CheckSubnetCapacity(ctx context.Context, subnetInfo SubnetProperties, sku string, clusterSize float32) (bool, error) {
-	requiredSubnetIPSize, err := getAmlfsSubnetSize(ctx, sku, clusterSize, d.mgmtClient)
+	requiredSubnetIPSize, err := d.getAmlfsSubnetSize(ctx, sku, clusterSize)
 	if err != nil {
-		return false, err
+		return false, convertHTTPResponseErrorToGrpcCodeError(err)
 	}
-	klog.Warningf("Required IPs: %d\n", requiredSubnetIPSize)
+	klog.Warningf("Required IPs: %d", requiredSubnetIPSize)
 
-	availableIPs, err := checkSubnetAddresses(ctx, subnetInfo.VnetResourceGroup, subnetInfo.VnetName, subnetInfo.SubnetID, d.vnetClient)
+	availableIPs, err := d.checkSubnetAddresses(ctx, subnetInfo.VnetResourceGroup, subnetInfo.VnetName, subnetInfo.SubnetID)
 	if err != nil {
-		return false, err
+		return false, convertHTTPResponseErrorToGrpcCodeError(err)
 	}
-	klog.Warningf("Available IPs: %d\n", availableIPs)
+	klog.Warningf("Available IPs: %d", availableIPs)
 
 	if requiredSubnetIPSize > availableIPs {
-		klog.Warningf("There is not enough room in the %s subnetID to fit a %s SKU cluster.\n", subnetInfo.SubnetID, sku)
+		klog.Warningf("There is not enough room in the %s subnetID to fit a %s SKU cluster: %v needed, %v available", subnetInfo.SubnetID, sku, requiredSubnetIPSize, availableIPs)
 		return false, nil
 	}
-	klog.Warningf("There is enough room in the %s subnetID to fit a %s SKU cluster.\n", subnetInfo.SubnetID, sku)
+	klog.V(2).Infof("There is enough room in the %s subnetID to fit a %s SKU cluster: %v needed, %v available", subnetInfo.SubnetID, sku, requiredSubnetIPSize, availableIPs)
 	return true, nil
 }
