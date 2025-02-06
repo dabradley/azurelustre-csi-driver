@@ -19,8 +19,7 @@ COPY "./pkg/azurelustreplugin/entrypoint.sh" "/app/entrypoint.sh"
 
 RUN chmod +x "/app/entrypoint.sh"
 
-RUN apt-get update && apt --only-upgrade -y install tar libudev1 libsystemd0 libssl3 libc6 libc-bin && apt -y install ca-certificates && apt-get -y dist-upgrade
-#RUN apt-get update && apt-get -y install ca-certificates && apt-get -y dist-upgrade
+RUN apt-get update && apt --only-upgrade -y install tar libudev1 libsystemd0 libssl3 libc6 libc-bin && apt -y install ca-certificates && apt-get -y upgrade
 
 RUN apt-get clean all
 

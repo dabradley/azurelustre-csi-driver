@@ -311,7 +311,7 @@ func TestNodePublishVolume(t *testing.T) {
 				VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: &csi.VolumeCapability_Mount{
 					Mount: &csi.VolumeCapability_MountVolume{MountFlags: []string{"noatime", "flock"}},
 				}},
-				VolumeId:      "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-name#test-amlfilesystem-rg",
+				VolumeId:      "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-rg",
 				TargetPath:    targetTest,
 				VolumeContext: map[string]string{"mgs-ip-address": "1.1.1.1", "fs-name": "lustrefs", "amlfilesystem-name": "test-amlfilesystem-name", "resource-group-name": "test-amlfilesystem-rg"},
 				Readonly:      false,
@@ -857,15 +857,18 @@ func TestNodeGetVolumeStats(t *testing.T) {
 	for _, test := range tests {
 		err := makeDir(fakePath)
 		require.NoError(t, err)
+
+		defer func() {
+			err = os.RemoveAll(fakePath)
+			require.NoError(t, err)
+		}()
+
 		t.Run(test.desc, func(t *testing.T) {
 			_, err := d.NodeGetVolumeStats(context.Background(), &test.req)
 			if !reflect.DeepEqual(err, test.expectedErr) {
 				t.Errorf("Desc: %v, Expected error: %v, Actual error: %v", test.desc, test.expectedErr, err)
 			}
 		})
-
-		err = os.RemoveAll(fakePath)
-		require.NoError(t, err)
 	}
 }
 
@@ -1038,7 +1041,7 @@ func TestNewLustreVolume(t *testing.T) {
 		},
 		{
 			desc:    "valid context with dynamic provisioning",
-			id:      "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-name#test-amlfilesystem-rg",
+			id:      "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-rg",
 			volName: "vol_1",
 			params: map[string]string{
 				"mgs-ip-address":      "1.1.1.1",
@@ -1047,12 +1050,11 @@ func TestNewLustreVolume(t *testing.T) {
 				"resource-group-name": "test-amlfilesystem-rg",
 			},
 			expectedLustreVolume: &lustreVolume{
-				id:                "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-name#test-amlfilesystem-rg",
+				id:                "vol_1#lustrefs#1.1.1.1##test-amlfilesystem-rg",
 				name:              "vol_1",
 				azureLustreName:   "lustrefs",
 				mgsIPAddress:      "1.1.1.1",
 				subDir:            "",
-				amlFilesystemName: "test-amlfilesystem-name",
 				resourceGroupName: "test-amlfilesystem-rg",
 			},
 		},

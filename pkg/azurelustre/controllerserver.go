@@ -19,7 +19,9 @@ package azurelustre
 import (
 	"context"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storagecache/armstoragecache/v4"
@@ -32,23 +34,28 @@ import (
 )
 
 const (
-	VolumeContextMGSIPAddress         = "mgs-ip-address"
-	VolumeContextFSName               = "fs-name"
-	VolumeContextSubDir               = "sub-dir"
-	VolumeContextLocation             = "location"
-	VolumeContextAmlFilesystemName    = "amlfilesystem-name"
-	VolumeContextResourceGroupName    = "resource-group-name"
-	VolumeContextVnetResourceGroup    = "vnet-resource-group"
-	VolumeContextVnetName             = "vnet-name"
-	VolumeContextSubnetName           = "subnet-name"
-	VolumeContextMaintenanceDayOfWeek = "maintenance-day-of-week"
-	VolumeContextTimeOfDayUtc         = "time-of-day-utc"
-	VolumeContextSkuName              = "sku-name"
-	VolumeContextZones                = "zones"
-	VolumeContextTags                 = "tags"
-	VolumeContextIdentities           = "identities"
-	defaultSizeInBytes                = 4 * util.TiB
-	defaultLaaSOBlockSizeInTib        = 4
+	VolumeContextMGSIPAddress               = "mgs-ip-address"
+	VolumeContextFSName                     = "fs-name"
+	VolumeContextSubDir                     = "sub-dir"
+	VolumeContextLocation                   = "location"
+	VolumeContextResourceGroupName          = "resource-group-name"
+	VolumeContextVnetResourceGroup          = "vnet-resource-group"
+	VolumeContextVnetName                   = "vnet-name"
+	VolumeContextSubnetName                 = "subnet-name"
+	VolumeContextMaintenanceDayOfWeek       = "maintenance-day-of-week"
+	VolumeContextTimeOfDayUtc               = "time-of-day-utc"
+	VolumeContextSkuName                    = "sku-name"
+	VolumeContextZones                      = "zones"
+	VolumeContextTags                       = "tags"
+	VolumeContextIdentities                 = "identities"
+	VolumeContextInternalDynamicallyCreated = "created-by-dynamic-provisioning"
+	defaultSizeInBytes                      = 4 * util.TiB
+	defaultLaaSOBlockSizeInTib              = 4
+	pvcNamespaceTag                         = "kubernetes.io-created-for-pvc-namespace"
+	pvcNameTag                              = "kubernetes.io-created-for-pvc-name"
+	pvNameTag                               = "kubernetes.io-created-for-pv-name"
+	createdByTag                            = "k8s-azure-created-by"
+	azureLustreDriverTag                    = "kubernetes-azurelustre-csi-driver"
 )
 
 var (
@@ -79,13 +86,12 @@ type AmlFilesystemProperties struct {
 
 func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemProperties, error) {
 	var amlFilesystemProperties AmlFilesystemProperties
-	var amlFilesystemName string
 	var errorParameters []string
 
-	amlFilesystemNameReplaceMap := map[string]string{}
 	shouldCreateAmlfsCluster := true
-
-	klog.V(2).Infof("properties: %#v", properties)
+	amlFilesystemProperties.Tags = map[string]string{
+		createdByTag: azureLustreDriverTag,
+	}
 
 	for propertyName, propertyValue := range properties {
 		switch strings.ToLower(propertyName) {
@@ -93,8 +99,6 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 			amlFilesystemProperties.ResourceGroupName = propertyValue
 		case VolumeContextMGSIPAddress:
 			shouldCreateAmlfsCluster = false
-		case VolumeContextAmlFilesystemName:
-			amlFilesystemName = propertyValue
 		case VolumeContextLocation:
 			amlFilesystemProperties.Location = propertyValue
 		case VolumeContextVnetName:
@@ -138,23 +142,31 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 					amlFilesystemProperties.Zones = append(amlFilesystemProperties.Zones, zone)
 				}
 			}
+			if len(amlFilesystemProperties.Zones) > 1 {
+				return nil, status.Errorf(codes.InvalidArgument, "CreateVolume %s must only contain a single zone, '%s' provided", VolumeContextZones, propertyValue)
+			}
 		case VolumeContextTags:
 			tags, err := util.ConvertTagsToMap(propertyValue)
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "CreateVolume %v", err)
 			}
 			if len(tags) > 0 {
-				amlFilesystemProperties.Tags = tags
+				for tag, value := range tags {
+					if tag == pvcNameTag || tag == pvcNamespaceTag || tag == pvNameTag || tag == createdByTag {
+						return nil, status.Errorf(codes.InvalidArgument, "CreateVolume Parameter %s must not contain %s as a tag", VolumeContextTags, tag)
+					}
+					amlFilesystemProperties.Tags[tag] = value
+				}
 			}
+		case pvcNameKey:
+			amlFilesystemProperties.Tags[pvcNameTag] = propertyValue
+		case pvcNamespaceKey:
+			amlFilesystemProperties.Tags[pvcNamespaceTag] = propertyValue
+		case pvNameKey:
+			amlFilesystemProperties.Tags[pvNameTag] = propertyValue
 		case VolumeContextIdentities:
 			amlFilesystemProperties.Identities = strings.Split(propertyValue, ",")
-		case pvcNamespaceKey:
-			amlFilesystemNameReplaceMap[pvcNamespaceMetadata] = propertyValue
-		case pvcNameKey:
-			amlFilesystemNameReplaceMap[pvcNameMetadata] = propertyValue
-		case pvNameKey:
-			amlFilesystemNameReplaceMap[pvNameMetadata] = propertyValue
-		// These will be used by the node methods
+			// These will be used by the node methods
 		case VolumeContextFSName:
 		case VolumeContextSubDir:
 			continue
@@ -174,20 +186,7 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 		)
 	}
 
-	if !shouldCreateAmlfsCluster && amlFilesystemName != "" {
-		return nil, status.Errorf(codes.InvalidArgument,
-			"CreateVolume %s must not be provided when using a static AMLFS ('%s' present)",
-			VolumeContextAmlFilesystemName,
-			VolumeContextMGSIPAddress)
-	}
-
 	if shouldCreateAmlfsCluster {
-		if len(amlFilesystemName) == 0 {
-			return nil, status.Errorf(codes.InvalidArgument,
-				"CreateVolume %s must be provided for dynamically provisioned AMLFS",
-				VolumeContextAmlFilesystemName)
-		}
-
 		if len(amlFilesystemProperties.MaintenanceDayOfWeek) == 0 {
 			return nil, status.Errorf(codes.InvalidArgument,
 				"CreateVolume %s must be provided for dynamically provisioned AMLFS",
@@ -211,33 +210,18 @@ func parseAmlFilesystemProperties(properties map[string]string) (*AmlFilesystemP
 				"CreateVolume %s must be provided for dynamically provisioned AMLFS",
 				VolumeContextZones)
 		}
-
-		amlFilesystemName = strings.TrimSpace(util.ReplaceWithMap(amlFilesystemName, amlFilesystemNameReplaceMap))
-		amlFilesystemProperties.AmlFilesystemName = amlFilesystemName
 	}
 
 	return &amlFilesystemProperties, nil
 }
 
-func validateAndPrependVolumeName(amlFilesystemName, volName string) string {
-	validAmlFilesystemName := volName + "-" + amlFilesystemName
-	validAmlFilesystemName = truncateAmlFilesystemName(validAmlFilesystemName)
+func isValidVolumeName(volName string) bool {
+	validAmlFilesystemName := volName
 	if !amlFilesystemNameRegex.MatchString(validAmlFilesystemName) {
-		defaultName := "azurelustre-csi"
-		validAmlFilesystemName = volName + "-" + defaultName
-		validAmlFilesystemName = regexp.MustCompile(`[^a-zA-Z0-9-_]+`).ReplaceAllString(validAmlFilesystemName, "")
-		validAmlFilesystemName = truncateAmlFilesystemName(validAmlFilesystemName)
-		validAmlFilesystemName = strings.Trim(validAmlFilesystemName, "-_")
-		klog.Warningf("the requested volume name (%q) is invalid, so it is regenerated as (%q)", amlFilesystemName, validAmlFilesystemName)
+		klog.Warningf("the requested volume name (%q) is invalid", validAmlFilesystemName)
+		return false
 	}
-	return validAmlFilesystemName
-}
-
-func truncateAmlFilesystemName(amlFilesystemName string) string {
-	if len(amlFilesystemName) > amlFilesystemNameMaxLength {
-		amlFilesystemName = amlFilesystemName[0:amlFilesystemNameMaxLength]
-	}
-	return amlFilesystemName
+	return true
 }
 
 func validateVolumeCapabilities(capabilities []*csi.VolumeCapability) error {
@@ -306,6 +290,7 @@ func (d *Driver) CreateVolume(
 	}
 
 	shouldCreateAmlfsCluster := false
+
 	mgsIPAddress := util.GetValueInMap(parameters, VolumeContextMGSIPAddress)
 	if mgsIPAddress == "" {
 		shouldCreateAmlfsCluster = true
@@ -320,7 +305,6 @@ func (d *Driver) CreateVolume(
 	capacityRange := req.GetCapacityRange()
 
 	capacityInBytes := capacityRange.GetRequiredBytes()
-	klog.V(2).Infof("capacityInBytes: %#v", capacityInBytes)
 	if capacityInBytes == 0 {
 		capacityInBytes = defaultSizeInBytes
 		klog.V(2).Infof("using default capacity: %#v", capacityInBytes)
@@ -333,6 +317,7 @@ func (d *Driver) CreateVolume(
 		klog.V(2).Infof("finding capacity based on SKU %s for location %s", amlFilesystemProperties.SKUName, amlFilesystemProperties.Location)
 		lustreSkuValue, err := d.getBlockSizeAndMaxCapacityForSkuInLocation(ctx, amlFilesystemProperties.SKUName, amlFilesystemProperties.Location)
 		if err != nil {
+			klog.Errorf("failed to get block size and max capacity for SKU: %s, error: %v", amlFilesystemProperties.SKUName, err)
 			return nil, err
 		}
 		blockSizeInBytes = lustreSkuValue.IncrementInTib * util.TiB
@@ -341,12 +326,13 @@ func (d *Driver) CreateVolume(
 
 	capacityInBytes, err = d.roundToAmlfsBlockSize(capacityInBytes, blockSizeInBytes, maxCapacityInBytes)
 	if err != nil {
+		klog.Errorf("failed to round capacity: %v", err)
 		return nil, err
 	}
-	klog.V(2).Infof("capacityInBytes: %#v", capacityInBytes)
+	klog.V(2).Infof("capacity (in bytes) after rounding to next cluster increment: %#v", capacityInBytes)
 
 	storageCapacityTib := float32(capacityInBytes) / util.TiB
-	klog.V(2).Infof("storageCapacityTib: %#v", storageCapacityTib)
+	klog.V(2).Infof("storage capacity requested (in TiB): %#v", storageCapacityTib)
 
 	// check if capacity is within the limit
 	if capacityRange.GetLimitBytes() != 0 && capacityInBytes > capacityRange.GetLimitBytes() {
@@ -355,7 +341,11 @@ func (d *Driver) CreateVolume(
 			capacityInBytes, capacityRange.GetLimitBytes())
 	}
 
+	createdByDynamicProvisioningStringValue := "f"
+
 	if shouldCreateAmlfsCluster {
+		createdByDynamicProvisioningStringValue = "t"
+
 		if len(amlFilesystemProperties.Location) == 0 {
 			amlFilesystemProperties.Location = d.location
 		}
@@ -367,19 +357,17 @@ func (d *Driver) CreateVolume(
 		amlFilesystemProperties.SubnetInfo = d.populateSubnetPropertiesFromCloudConfig(amlFilesystemProperties.SubnetInfo)
 
 		amlFilesystemProperties.StorageCapacityTiB = storageCapacityTib
-		klog.V(2).Infof("storageCapacityTib: %#v", storageCapacityTib)
 
-		amlFilesystemName := amlFilesystemProperties.AmlFilesystemName
-		amlFilesystemName = validateAndPrependVolumeName(amlFilesystemName, volName)
-		if !strings.Contains(amlFilesystemName, volName) {
+		if !isValidVolumeName(volName) {
 			return nil, status.Errorf(codes.InvalidArgument,
 				"CreateVolume invalid volume name %s, cannot create valid AMLFS name. Check length and characters",
 				volName)
 		}
-		amlFilesystemProperties.AmlFilesystemName = amlFilesystemName
+		amlFilesystemProperties.AmlFilesystemName = volName
 
 		klog.V(2).Infof(
-			"beginning to create AMLFS cluster (%s)", amlFilesystemProperties.AmlFilesystemName,
+			"beginning to create AMLFS cluster (%s): %#v", amlFilesystemProperties.AmlFilesystemName,
+			amlFilesystemProperties,
 		)
 
 		mgsIPAddress, err = d.dynamicProvisioner.CreateAmlFilesystem(ctx, amlFilesystemProperties)
@@ -393,11 +381,12 @@ func (d *Driver) CreateVolume(
 			return nil, status.Errorf(errCode, "CreateVolume error when creating AMLFS %s: %v", amlFilesystemProperties.AmlFilesystemName, err)
 		}
 
-		util.SetKeyValueInMap(parameters, VolumeContextAmlFilesystemName, amlFilesystemProperties.AmlFilesystemName)
 		util.SetKeyValueInMap(parameters, VolumeContextResourceGroupName, amlFilesystemProperties.ResourceGroupName)
 		util.SetKeyValueInMap(parameters, VolumeContextMGSIPAddress, mgsIPAddress)
 		util.SetKeyValueInMap(parameters, VolumeContextFSName, DefaultLustreFsName)
 	}
+
+	util.SetKeyValueInMap(parameters, VolumeContextInternalDynamicallyCreated, createdByDynamicProvisioningStringValue)
 
 	volumeID, err := createVolumeIDFromParams(volName, parameters)
 	if err != nil {
@@ -421,15 +410,12 @@ func (d *Driver) getBlockSizeAndMaxCapacityForSkuInLocation(ctx context.Context,
 	skus := d.dynamicProvisioner.GetSkuValuesForLocation(ctx, location)
 	retrievedSkuValue, ok := skus[skuName]
 	if !ok {
-		validSkus := make([]string, 0, len(skus))
-		for k := range skus {
-			validSkus = append(validSkus, k)
-		}
+		validSkuNames := slices.Sorted(maps.Keys(skus))
 		return nil, status.Errorf(
 			codes.InvalidArgument,
 			"CreateVolume Parameter %s must be one of: %v",
 			VolumeContextSkuName,
-			validSkus,
+			validSkuNames,
 		)
 	}
 	return retrievedSkuValue, nil
@@ -513,13 +499,9 @@ func (d *Driver) DeleteVolume(
 		)
 	}
 
-	amlFilesystemName := ""
-
 	lustreVolume, err := getLustreVolFromID(volumeID)
 	if err != nil {
 		klog.Warningf("error parsing volume ID '%v'", err)
-	} else {
-		amlFilesystemName = lustreVolume.amlFilesystemName
 	}
 
 	if acquired := d.volumeLocks.TryAcquire(volumeID); !acquired {
@@ -536,8 +518,15 @@ func (d *Driver) DeleteVolume(
 
 	klog.V(2).Infof("deleting volumeID(%s)", volumeID)
 
-	if amlFilesystemName != "" {
-		err := d.dynamicProvisioner.DeleteAmlFilesystem(ctx, lustreVolume.resourceGroupName, amlFilesystemName)
+	if lustreVolume != nil && lustreVolume.createdByDynamicProvisioning {
+		amlFilesystemName := lustreVolume.name
+		resourceGroupName := lustreVolume.resourceGroupName
+
+		if resourceGroupName == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "volume was dynamically created but associated resource group is not specified. AMLFS cluster may need to be deleted manually")
+		}
+
+		err := d.dynamicProvisioner.DeleteAmlFilesystem(ctx, resourceGroupName, amlFilesystemName)
 		if err != nil {
 			errCode := status.Code(err)
 			if errCode == codes.Unknown {
@@ -604,15 +593,15 @@ func (d *Driver) ControllerGetCapabilities(
 
 // Convert VolumeCreate parameters to a volume id
 func createVolumeIDFromParams(volName string, params map[string]string) (string, error) {
-	var mgsIPAddress, amlFilesystemName, resourceGroupName, subDir string
+	var mgsIPAddress, createdByDynamicProvisioningStringValue, resourceGroupName, subDir string
 
 	// validate parameters (case-insensitive).
 	for k, v := range params {
 		switch strings.ToLower(k) {
 		case VolumeContextMGSIPAddress:
 			mgsIPAddress = v
-		case VolumeContextAmlFilesystemName:
-			amlFilesystemName = v
+		case VolumeContextInternalDynamicallyCreated:
+			createdByDynamicProvisioningStringValue = v
 		case VolumeContextResourceGroupName:
 			resourceGroupName = v
 		case VolumeContextSubDir:
@@ -628,7 +617,7 @@ func createVolumeIDFromParams(volName string, params map[string]string) (string,
 		}
 	}
 
-	volumeID := fmt.Sprintf(volumeIDTemplate, volName, DefaultLustreFsName, mgsIPAddress, subDir, amlFilesystemName, resourceGroupName)
+	volumeID := fmt.Sprintf(volumeIDTemplate, volName, DefaultLustreFsName, mgsIPAddress, subDir, createdByDynamicProvisioningStringValue, resourceGroupName)
 
 	return volumeID, nil
 }

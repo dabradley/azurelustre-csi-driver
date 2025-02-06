@@ -151,6 +151,10 @@ func TestGetMountOptions(t *testing.T) {
 			options:  []string{""},
 			expected: "",
 		},
+		{
+			options:  []string{},
+			expected: "",
+		},
 	}
 
 	for _, test := range tests {
@@ -159,17 +163,6 @@ func TestGetMountOptions(t *testing.T) {
 			t.Errorf("getMountOptions(%v) result: %s, expected: %s", test.options, result, test.expected)
 		}
 	}
-}
-
-func TestMakeDir(t *testing.T) {
-	// Successfully create directory
-	targetTest := "./target_test"
-	err := MakeDir(targetTest)
-	require.NoError(t, err)
-
-	// Remove the directory created
-	err = os.RemoveAll(targetTest)
-	require.NoError(t, err)
 }
 
 func TestConvertTagsToMap(t *testing.T) {
@@ -379,4 +372,41 @@ func TestReplaceWithMap(t *testing.T) {
 			t.Errorf("test[%s]: unexpected output: %v, expected result: %v", test.desc, result, test.expected)
 		}
 	}
+}
+
+func TestMakeDir(t *testing.T) {
+	// Successfully create directory
+	targetTest := "./target_test"
+	err := MakeDir(targetTest)
+	require.NoError(t, err)
+
+	// Check if directory exists
+	_, err = os.Stat(targetTest)
+	require.False(t, os.IsNotExist(err))
+
+	// Remove the directory created
+	err = os.RemoveAll(targetTest)
+	require.NoError(t, err)
+}
+
+func TestMakeDirAlreadyExists(t *testing.T) {
+	// Create directory
+	targetTest := "./target_test"
+	err := MakeDir(targetTest)
+	require.NoError(t, err)
+
+	// Try to create the same directory again
+	err = MakeDir(targetTest)
+	require.NoError(t, err)
+
+	// Remove the directory created
+	err = os.RemoveAll(targetTest)
+	require.NoError(t, err)
+}
+
+func TestMakeDirInvalidPath(t *testing.T) {
+	// Try to create a directory with an invalid path
+	invalidPath := string([]byte{0})
+	err := MakeDir(invalidPath)
+	require.Error(t, err)
 }

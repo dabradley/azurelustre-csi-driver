@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,13 +85,9 @@ func (f *FakeDynamicProvisioner) DeleteAmlFilesystem(_ context.Context, _, amlFi
 	if amlFilesystemName == clusterRequestFailureName {
 		return status.Errorf(codes.InvalidArgument, "error occurred calling API: %s", clusterRequestFailureName)
 	}
-	var filesystems []*AmlFilesystemProperties
-	for _, filesystem := range f.Filesystems {
-		if filesystem.AmlFilesystemName != amlFilesystemName {
-			filesystems = append(filesystems, filesystem)
-		}
-	}
-	f.Filesystems = filesystems
+	f.Filesystems = slices.DeleteFunc(f.Filesystems, func(filesystem *AmlFilesystemProperties) bool {
+		return filesystem.AmlFilesystemName == amlFilesystemName
+	})
 	return nil
 }
 
@@ -156,37 +153,35 @@ func TestGetLustreVolFromID(t *testing.T) {
 			desc:     "correct old volume id",
 			volumeID: "vol_1#lustrefs#1.1.1.1",
 			expectedLustreVolume: &lustreVolume{
-				id:                "vol_1#lustrefs#1.1.1.1",
-				name:              "vol_1",
-				azureLustreName:   "lustrefs",
-				mgsIPAddress:      "1.1.1.1",
-				subDir:            "",
-				amlFilesystemName: "",
+				id:              "vol_1#lustrefs#1.1.1.1",
+				name:            "vol_1",
+				azureLustreName: "lustrefs",
+				mgsIPAddress:    "1.1.1.1",
+				subDir:          "",
 			},
 		},
 		{
 			desc:     "correct simple volume id",
-			volumeID: "vol_1#lustrefs#1.1.1.1###",
+			volumeID: "vol_1#lustrefs#1.1.1.1##",
 			expectedLustreVolume: &lustreVolume{
-				id:                "vol_1#lustrefs#1.1.1.1###",
-				name:              "vol_1",
-				azureLustreName:   "lustrefs",
-				mgsIPAddress:      "1.1.1.1",
-				subDir:            "",
-				amlFilesystemName: "",
+				id:              "vol_1#lustrefs#1.1.1.1##",
+				name:            "vol_1",
+				azureLustreName: "lustrefs",
+				mgsIPAddress:    "1.1.1.1",
+				subDir:          "",
 			},
 		},
 		{
 			desc:     "correct volume id",
-			volumeID: "vol_1#lustrefs#1.1.1.1#testSubDir#testAmlFs#testAmlfsRg",
+			volumeID: "vol_1#lustrefs#1.1.1.1#testSubDir#t#testAmlfsRg",
 			expectedLustreVolume: &lustreVolume{
-				id:                "vol_1#lustrefs#1.1.1.1#testSubDir#testAmlFs#testAmlfsRg",
-				name:              "vol_1",
-				azureLustreName:   "lustrefs",
-				mgsIPAddress:      "1.1.1.1",
-				subDir:            "testSubDir",
-				amlFilesystemName: "testAmlFs",
-				resourceGroupName: "testAmlfsRg",
+				id:                           "vol_1#lustrefs#1.1.1.1#testSubDir#t#testAmlfsRg",
+				name:                         "vol_1",
+				azureLustreName:              "lustrefs",
+				mgsIPAddress:                 "1.1.1.1",
+				subDir:                       "testSubDir",
+				createdByDynamicProvisioning: true,
+				resourceGroupName:            "testAmlfsRg",
 			},
 		},
 		{
@@ -202,21 +197,9 @@ func TestGetLustreVolFromID(t *testing.T) {
 		},
 		{
 			desc:     "correct volume id with empty sub-dir",
-			volumeID: "vol_1#lustrefs/#1.1.1.1##",
+			volumeID: "vol_1#lustrefs#1.1.1.1##",
 			expectedLustreVolume: &lustreVolume{
-				id:                "vol_1#lustrefs/#1.1.1.1##",
-				name:              "vol_1",
-				azureLustreName:   "lustrefs",
-				mgsIPAddress:      "1.1.1.1",
-				subDir:            "",
-				amlFilesystemName: "",
-			},
-		},
-		{
-			desc:     "correct volume id with empty sub-dir, old format",
-			volumeID: "vol_1#lustrefs/#1.1.1.1#",
-			expectedLustreVolume: &lustreVolume{
-				id:              "vol_1#lustrefs/#1.1.1.1#",
+				id:              "vol_1#lustrefs#1.1.1.1##",
 				name:            "vol_1",
 				azureLustreName: "lustrefs",
 				mgsIPAddress:    "1.1.1.1",
@@ -224,16 +207,27 @@ func TestGetLustreVolFromID(t *testing.T) {
 			},
 		},
 		{
-			desc:     "correct volume id with filesystem name but empty sub-dir",
-			volumeID: "vol_1#lustrefs/#1.1.1.1##testAmlFs#testAmlfsRg",
+			desc:     "correct volume id with empty sub-dir, old format",
+			volumeID: "vol_1#lustrefs#1.1.1.1#",
 			expectedLustreVolume: &lustreVolume{
-				id:                "vol_1#lustrefs/#1.1.1.1##testAmlFs#testAmlfsRg",
-				name:              "vol_1",
-				azureLustreName:   "lustrefs",
-				mgsIPAddress:      "1.1.1.1",
-				subDir:            "",
-				amlFilesystemName: "testAmlFs",
-				resourceGroupName: "testAmlfsRg",
+				id:              "vol_1#lustrefs#1.1.1.1#",
+				name:            "vol_1",
+				azureLustreName: "lustrefs",
+				mgsIPAddress:    "1.1.1.1",
+				subDir:          "",
+			},
+		},
+		{
+			desc:     "correct volume id with filesystem rg but empty sub-dir",
+			volumeID: "vol_1#lustrefs#1.1.1.1##t#testAmlfsRg",
+			expectedLustreVolume: &lustreVolume{
+				id:                           "vol_1#lustrefs#1.1.1.1##t#testAmlfsRg",
+				name:                         "vol_1",
+				azureLustreName:              "lustrefs",
+				mgsIPAddress:                 "1.1.1.1",
+				subDir:                       "",
+				createdByDynamicProvisioning: true,
+				resourceGroupName:            "testAmlfsRg",
 			},
 		},
 		{

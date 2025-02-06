@@ -229,7 +229,6 @@ func getMountOptions(req *csi.NodePublishVolumeRequest, userMountFlags []string)
 
 func getVolume(volumeID string, context map[string]string) (*lustreVolume, error) {
 	volName := ""
-	klog.Infof("context '%#v'", context)
 
 	volFromID, err := getLustreVolFromID(volumeID)
 	if err != nil {
@@ -707,7 +706,9 @@ func ensureStrictSubpath(subPath string) bool {
 
 // Convert context parameters to a lustreVolume
 func newLustreVolume(volumeID, volumeName string, params map[string]string) (*lustreVolume, error) {
-	var mgsIPAddress, subDir, amlFilesystemName, resourceGroupName string
+	var mgsIPAddress, subDir, resourceGroupName string
+	createdByDynamicProvisioning := false
+
 	// validate parameters (case-insensitive).
 	for k, v := range params {
 		switch strings.ToLower(k) {
@@ -723,8 +724,13 @@ func newLustreVolume(volumeID, volumeName string, params map[string]string) (*lu
 					"Context sub-dir must not be empty or root if provided",
 				)
 			}
-		case VolumeContextAmlFilesystemName:
-			amlFilesystemName = v
+		case VolumeContextInternalDynamicallyCreated:
+			if v == "t" {
+				createdByDynamicProvisioning = true
+			}
+			if v != "" && v != "f" {
+				klog.Warningf("invalid value for %s, should be 't' or 'f': %s", VolumeContextInternalDynamicallyCreated, v)
+			}
 		case VolumeContextResourceGroupName:
 			resourceGroupName = v
 		}
@@ -738,13 +744,13 @@ func newLustreVolume(volumeID, volumeName string, params map[string]string) (*lu
 	}
 
 	vol := &lustreVolume{
-		name:              volumeName,
-		mgsIPAddress:      mgsIPAddress,
-		azureLustreName:   DefaultLustreFsName,
-		subDir:            subDir,
-		id:                volumeID,
-		amlFilesystemName: amlFilesystemName,
-		resourceGroupName: resourceGroupName,
+		name:                         volumeName,
+		mgsIPAddress:                 mgsIPAddress,
+		azureLustreName:              DefaultLustreFsName,
+		subDir:                       subDir,
+		id:                           volumeID,
+		createdByDynamicProvisioning: createdByDynamicProvisioning,
+		resourceGroupName:            resourceGroupName,
 	}
 
 	return vol, nil

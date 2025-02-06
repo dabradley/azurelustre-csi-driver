@@ -94,13 +94,13 @@ var (
 )
 
 type lustreVolume struct {
-	name              string
-	id                string
-	mgsIPAddress      string
-	azureLustreName   string
-	subDir            string
-	amlFilesystemName string
-	resourceGroupName string
+	name                         string
+	id                           string
+	mgsIPAddress                 string
+	azureLustreName              string
+	subDir                       string
+	createdByDynamicProvisioning bool
+	resourceGroupName            string
 }
 
 // DriverOptions defines driver parameters specified in driver deployment
@@ -185,20 +185,12 @@ func NewDriver(options *DriverOptions) *Driver {
 		}
 	} else {
 		config.UserAgent = GetUserAgent(d.Name, "", "")
-		// these environment variables are injected by workload identity webhook
-		// if tenantID := os.Getenv("AZURE_TENANT_ID"); tenantID != "" {
-		// 	config.TenantID = tenantID
-		// }
 		if clientID := os.Getenv("AZURE_CLIENT_ID"); clientID != "" {
 			config.AADClientID = clientID
 		} else if config.UseManagedIdentityExtension && config.UserAssignedIdentityID != "" {
 			os.Setenv("AZURE_CLIENT_ID", config.UserAssignedIdentityID)
 			config.AADClientID = config.UserAssignedIdentityID
 		}
-		// if federatedTokenFile := os.Getenv("AZURE_FEDERATED_TOKEN_FILE"); federatedTokenFile != "" {
-		// 	config.AADFederatedTokenFile = federatedTokenFile
-		// 	config.UseFederatedWorkloadIdentityExtension = true
-		// }
 		if err = az.InitializeCloudFromConfig(ctx, config, false, false); err != nil {
 			klog.Warningf("InitializeCloudFromConfig failed with error: %v", err)
 		}
@@ -210,7 +202,6 @@ func NewDriver(options *DriverOptions) *Driver {
 		if err != nil {
 			klog.Warningf("failed to obtain a credential: %v", err)
 		}
-		klog.V(2).Infof("CREDENTIAL: %#v", cred)
 		storageClientFactory, err := armstoragecache.NewClientFactory(config.SubscriptionID, cred, nil)
 		if err != nil {
 			klog.Warningf("failed to create storage client factory: %v", err)
@@ -235,9 +226,6 @@ func NewDriver(options *DriverOptions) *Driver {
 			defaultSkuValues:     DefaultSkuValues,
 		}
 	}
-
-	klog.V(2).Infof("config: %#v", config)
-	klog.V(2).Infof("driver: %#v", &d)
 
 	return &d
 }
@@ -327,15 +315,11 @@ func getLustreVolFromID(id string) (*lustreVolume, error) {
 	}
 
 	if len(segments) >= 5 {
-		vol.amlFilesystemName = segments[4]
+		vol.createdByDynamicProvisioning = segments[4] == "t"
 	}
 
 	if len(segments) >= 6 {
 		vol.resourceGroupName = segments[5]
-	}
-
-	if vol.amlFilesystemName != "" && vol.resourceGroupName == "" {
-		return nil, fmt.Errorf("dynamically created aml filesystem name is set but associated resource group is not")
 	}
 
 	return vol, nil

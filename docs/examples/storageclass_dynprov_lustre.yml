@@ -5,11 +5,6 @@ metadata:
   # The name of the StorageClass.
   name: dynprov.azurelustre.csi.azure.com
 parameters:
-  # amlfilesystem-name can interpret metadata such as
-  #  "${pvc.metadata.name}"
-  #  "${pvc.metadata.namespace}"
-  #  "${pv.metadata.name}"
-  amlfilesystem-name: "davidbradley-amlfs"
   # location to create the AMLFS cluster
   location: eastus2 # defaults to AKS location
   # vnet resource group the AMLFS cluster will use
@@ -26,7 +21,7 @@ parameters:
   # "AMLFS-Durable-Premium-250"
   # "AMLFS-Durable-Premium-500"
   sku-name: AMLFS-Durable-Premium-40
-  zones: "1,"
+  zones: "1"
   tags: "owner=davidbradley"
   # resource-group-name: davidbradley-amlfs-rg # defaults to AKS resource group
   # identities: "identity1,identity2"

@@ -93,19 +93,21 @@ func buildDynamicProvCreateVolumeRequest() *csi.CreateVolumeRequest {
 			},
 		},
 		Parameters: map[string]string{
-			"resource-group-name":     "test-resource-group",
-			"amlfilesystem-name":      "test-filesystem",
-			"location":                "test-location",
-			"vnet-resource-group":     "test-vnet-rg",
-			"vnet-name":               "test-vnet-name",
-			"subnet-name":             "test-subnet-name",
-			"maintenance-day-of-week": "Monday",
-			"time-of-day-utc":         "12:00",
-			"sku-name":                "AMLFS-Durable-Premium-250",
-			"identities":              "identity1,identity2",
-			"tags":                    "key1=value1,key2=value2",
-			"zones":                   "zone1,zone2",
-			"sub-dir":                 "testSubDir",
+			"resource-group-name":              "test-resource-group",
+			"location":                         "test-location",
+			"vnet-resource-group":              "test-vnet-rg",
+			"vnet-name":                        "test-vnet-name",
+			"subnet-name":                      "test-subnet-name",
+			"maintenance-day-of-week":          "Monday",
+			"time-of-day-utc":                  "12:00",
+			"sku-name":                         "AMLFS-Durable-Premium-250",
+			"identities":                       "identity1,identity2",
+			"tags":                             "key1=value1,key2=value2",
+			"zones":                            "zone1",
+			"sub-dir":                          "testSubDir",
+			"csi.storage.k8s.io/pvc/name":      "pvc_name",
+			"csi.storage.k8s.io/pvc/namespace": "pvc_namespace",
+			"csi.storage.k8s.io/pv/name":       "pv_name",
 		},
 	}
 	return req
@@ -130,7 +132,7 @@ func TestCreateVolume_Success_DoesNotCallDynamicProvisioner(t *testing.T) {
 	_, err := d.CreateVolume(context.Background(), req)
 	require.NoError(t, err)
 	assert.Empty(t, fakeDynamicProvisioner.Filesystems, 0)
-	assert.Empty(t, fakeDynamicProvisioner.fakeCallCount, 0, "unexpected calls made to dynamic provisioner")
+	assert.Empty(t, fakeDynamicProvisioner.fakeCallCount, 0, "unexpected calls made to dynamic provisioner, all calls: %#v", fakeDynamicProvisioner.fakeCallCount)
 }
 
 func TestDynamicCreateVolume_Success(t *testing.T) {
@@ -150,15 +152,22 @@ func TestDynamicCreateVolume_Success(t *testing.T) {
 func TestDynamicCreateVolume_Success_SendsCorrectProperties(t *testing.T) {
 	expectedAmlfsProperties := &AmlFilesystemProperties{
 		ResourceGroupName:    "test-resource-group",
-		AmlFilesystemName:    "test_volume-test-filesystem",
+		AmlFilesystemName:    "test_volume",
 		Location:             "test-location",
 		MaintenanceDayOfWeek: "Monday",
 		TimeOfDayUTC:         "12:00",
 		SKUName:              "AMLFS-Durable-Premium-250",
 		StorageCapacityTiB:   8,
 		Identities:           []string{"identity1", "identity2"},
-		Tags:                 map[string]string{"key1": "value1", "key2": "value2"},
-		Zones:                []string{"zone1", "zone2"},
+		Tags: map[string]string{
+			"key1":                               "value1",
+			"key2":                               "value2",
+			"k8s-azure-created-by":               "kubernetes-azurelustre-csi-driver",
+			"kubernetes.io-created-for-pvc-name": "pvc_name",
+			"kubernetes.io-created-for-pv-name":  "pv_name",
+			"kubernetes.io-created-for-pvc-namespace": "pvc_namespace",
+		},
+		Zones: []string{"zone1"},
 		SubnetInfo: SubnetProperties{
 			VnetResourceGroup: "test-vnet-rg",
 			VnetName:          "test-vnet-name",
@@ -181,7 +190,7 @@ func TestDynamicCreateVolume_Success_SendsCorrectProperties(t *testing.T) {
 	assert.NotZero(t, rep.GetVolume().GetCapacityBytes())
 	assert.NotEmpty(t, rep.GetVolume().GetVolumeContext())
 	require.Len(t, fakeDynamicProvisioner.Filesystems, 1)
-	require.Len(t, fakeDynamicProvisioner.fakeCallCount, 2, "unexpected calls made to dynamic provisioner")
+	require.Len(t, fakeDynamicProvisioner.fakeCallCount, 2, "unexpected calls made to dynamic provisioner, all calls: %#v", fakeDynamicProvisioner.fakeCallCount)
 	require.Equal(t, 1, fakeDynamicProvisioner.fakeCallCount["CreateAmlFilesystem"])
 	require.Equal(t, 1, fakeDynamicProvisioner.fakeCallCount["GetSkuValuesForLocation"])
 	assert.Equal(t, expectedAmlfsProperties, fakeDynamicProvisioner.Filesystems[0])
@@ -231,53 +240,6 @@ func TestDynamicCreateVolume_Success_UsesReturnedIPAddress(t *testing.T) {
 	assert.NotEmpty(t, rep.GetVolume())
 	assert.NotEmpty(t, rep.GetVolume().GetVolumeId())
 	assert.Contains(t, rep.GetVolume().GetVolumeId(), "127.0.0.2")
-}
-
-func TestDynamicCreateVolume_Success_NameMapping(t *testing.T) {
-	pvcName := "pvc_name"
-	pvcNamespace := "pvc_namespace"
-	pvName := "pv_name"
-
-	testCases := []struct {
-		fileSystemName     string
-		expectedVolumeName string
-	}{
-		{
-			fileSystemName:     "test-filesystem",
-			expectedVolumeName: "test_volume-test-filesystem",
-		},
-		{
-			fileSystemName:     "test-filesystem-${pvc.metadata.name}",
-			expectedVolumeName: "test_volume-test-filesystem-" + pvcName,
-		},
-		{
-			fileSystemName:     "test-filesystem-${pvc.metadata.namespace}",
-			expectedVolumeName: "test_volume-test-filesystem-" + pvcNamespace,
-		},
-		{
-			fileSystemName:     "test-filesystem-${pv.metadata.name}",
-			expectedVolumeName: "test_volume-test-filesystem-" + pvName,
-		},
-	}
-	for _, tC := range testCases {
-		t.Run(tC.fileSystemName, func(t *testing.T) {
-			d := NewFakeDriver()
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-			d.cloud = azure.GetTestCloud(ctrl)
-
-			req := buildDynamicProvCreateVolumeRequest()
-			req.Parameters[pvcNameKey] = pvcName
-			req.Parameters[pvcNamespaceKey] = pvcNamespace
-			req.Parameters[pvNameKey] = pvName
-			req.Parameters["amlfilesystem-name"] = tC.fileSystemName
-			rep, err := d.CreateVolume(context.Background(), req)
-			require.NoError(t, err)
-			assert.NotEmpty(t, rep.GetVolume())
-			expectedOutput := fmt.Sprintf("test_volume#lustrefs#127.0.0.2#testSubDir#%s#test-resource-group", tC.expectedVolumeName)
-			assert.Equal(t, expectedOutput, rep.GetVolume().GetVolumeId())
-		})
-	}
 }
 
 func TestCreateVolume_Success_CapacityRoundUp(t *testing.T) {
@@ -333,7 +295,7 @@ func TestDynamicCreateVolume_Err_CreateError(t *testing.T) {
 	defer ctrl.Finish()
 	d.cloud = azure.GetTestCloud(ctrl)
 	req := buildDynamicProvCreateVolumeRequest()
-	req.Parameters["amlfilesystem-name"] = clusterRequestFailureName
+	req.Name = clusterRequestFailureName
 	_, err := d.CreateVolume(context.Background(), req)
 	require.Error(t, err)
 	grpcStatus, ok := status.FromError(err)
@@ -412,30 +374,6 @@ func TestCreateVolume_Err_NoParameters(t *testing.T) {
 	require.ErrorContains(t, err, "Parameters must be provided")
 }
 
-func TestCreateVolume_Err_MixDynamicAndStatic(t *testing.T) {
-	d := NewFakeDriver()
-	req := buildCreateVolumeRequest()
-	req.Parameters[VolumeContextAmlFilesystemName] = "test-filesystem"
-	_, err := d.CreateVolume(context.Background(), req)
-	require.Error(t, err)
-	grpcStatus, ok := status.FromError(err)
-	assert.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	require.ErrorContains(t, err, "must not be provided when using a static AMLFS")
-}
-
-func TestCreateVolume_Err_NoAmlfsName(t *testing.T) {
-	d := NewFakeDriver()
-	req := buildDynamicProvCreateVolumeRequest()
-	delete(req.GetParameters(), VolumeContextAmlFilesystemName)
-	_, err := d.CreateVolume(context.Background(), req)
-	require.Error(t, err)
-	grpcStatus, ok := status.FromError(err)
-	assert.True(t, ok)
-	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
-	require.ErrorContains(t, err, "must be provided for dynamically provisioned AMLFS")
-}
-
 func TestCreateVolume_Err_BadSku(t *testing.T) {
 	d := NewFakeDriver()
 	req := buildDynamicProvCreateVolumeRequest()
@@ -498,7 +436,7 @@ func TestCreateVolume_Success_NoFSName(t *testing.T) {
 	rep, err := d.CreateVolume(context.Background(), req)
 	require.NoError(t, err)
 	assert.NotEmpty(t, rep.GetVolume())
-	expectedOutput := "test_volume#lustrefs#127.0.0.1#testSubDir##"
+	expectedOutput := "test_volume#lustrefs#127.0.0.1#testSubDir#f#"
 	assert.Equal(t, expectedOutput, rep.GetVolume().GetVolumeId())
 }
 
@@ -509,7 +447,7 @@ func TestCreateVolume_Success_EmptyFSName(t *testing.T) {
 	rep, err := d.CreateVolume(context.Background(), req)
 	require.NoError(t, err)
 	assert.NotEmpty(t, rep.GetVolume())
-	expectedOutput := "test_volume#lustrefs#127.0.0.1#testSubDir##"
+	expectedOutput := "test_volume#lustrefs#127.0.0.1#testSubDir#f#"
 	assert.Equal(t, expectedOutput, rep.GetVolume().GetVolumeId())
 }
 
@@ -703,19 +641,48 @@ func TestCreateVolume_Err_OperationExists(t *testing.T) {
 
 func TestDeleteVolume_Success(t *testing.T) {
 	d := NewFakeDriver()
+	fakeDynamicProvisioner := &FakeDynamicProvisioner{}
+	d.dynamicProvisioner = fakeDynamicProvisioner
 	req := &csi.DeleteVolumeRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"testVolume", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test_volume", "testFs", "127.0.0.1", "testSubDir", "f", ""),
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
+	require.Empty(t, fakeDynamicProvisioner.fakeCallCount, "unexpected calls made to dynamic provisioner, all calls: %#v", fakeDynamicProvisioner.fakeCallCount)
 	require.NoError(t, err)
 }
 
-func TestDeleteVolume_SuccessNoFsName(t *testing.T) {
+func TestDeleteVolume_Success_MissingDynamicCreateValue(t *testing.T) {
+	d := NewFakeDriver()
+	fakeDynamicProvisioner := &FakeDynamicProvisioner{}
+	d.dynamicProvisioner = fakeDynamicProvisioner
+	req := &csi.DeleteVolumeRequest{
+		VolumeId: fmt.Sprintf(volumeIDTemplate,
+			"test_volume", "testFs", "127.0.0.1", "testSubDir", "", ""),
+	}
+	_, err := d.DeleteVolume(context.Background(), req)
+	require.Empty(t, fakeDynamicProvisioner.fakeCallCount, "unexpected calls made to dynamic provisioner, all calls: %#v", fakeDynamicProvisioner.fakeCallCount)
+	require.NoError(t, err)
+}
+
+func TestDeleteVolume_Success_UnnecessaryResourceGroup(t *testing.T) {
+	d := NewFakeDriver()
+	fakeDynamicProvisioner := &FakeDynamicProvisioner{}
+	d.dynamicProvisioner = fakeDynamicProvisioner
+	req := &csi.DeleteVolumeRequest{
+		VolumeId: fmt.Sprintf(volumeIDTemplate,
+			"test_volume", "testFs", "127.0.0.1", "testSubDir", "f", "testResourceGroupName"),
+	}
+	_, err := d.DeleteVolume(context.Background(), req)
+	require.Empty(t, fakeDynamicProvisioner.fakeCallCount, "unexpected calls made to dynamic provisioner, all calls: %#v", fakeDynamicProvisioner.fakeCallCount)
+	require.NoError(t, err)
+}
+
+func TestDeleteVolume_Success_NoFsName(t *testing.T) {
 	d := NewFakeDriver()
 	req := &csi.DeleteVolumeRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"testVolume", "", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"testVolume", "", "127.0.0.1", "testSubDir", "f", ""),
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
 	require.NoError(t, err)
@@ -730,18 +697,20 @@ func TestDynamicDeleteVolume_Success(t *testing.T) {
 	defer ctrl.Finish()
 	d.cloud = azure.GetTestCloud(ctrl)
 	createReq := buildDynamicProvCreateVolumeRequest()
-	delete(createReq.GetParameters(), "location")
 	rep, err := d.CreateVolume(context.Background(), createReq)
 	require.NoError(t, err)
 	assert.NotEmpty(t, rep.GetVolume())
 	assert.NotEmpty(t, rep.GetVolume().GetVolumeId())
 	require.NotEmpty(t, fakeDynamicProvisioner.Filesystems)
+	fakeDynamicProvisioner.fakeCallCount = make(map[string]int)
 
 	deleteRequest := &csi.DeleteVolumeRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"testVolume", "testFs", "127.0.0.1", "testSubDir", "test_volume-test-filesystem", "testResourceGroupName"),
+			"test_volume", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 	}
 	_, err = d.DeleteVolume(context.Background(), deleteRequest)
+	require.Len(t, fakeDynamicProvisioner.fakeCallCount, 1, "unexpected calls made to dynamic provisioner, all calls: %#v", fakeDynamicProvisioner.fakeCallCount)
+	require.Equal(t, 1, fakeDynamicProvisioner.fakeCallCount["DeleteAmlFilesystem"])
 	require.NoError(t, err)
 	assert.Empty(t, fakeDynamicProvisioner.Filesystems)
 }
@@ -756,7 +725,7 @@ func TestDynamicDeleteVolume_Err_DeleteError(t *testing.T) {
 	d.cloud = azure.GetTestCloud(ctrl)
 	req := &csi.DeleteVolumeRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"testVolume", "testFs", "127.0.0.1", "testSubDir", clusterRequestFailureName, "testResourceGroupName"),
+			clusterRequestFailureName, "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
 	require.Error(t, err)
@@ -793,7 +762,7 @@ func TestDeleteVolume_Err_HasSecrets(t *testing.T) {
 	d := NewFakeDriver()
 	req := &csi.DeleteVolumeRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"testVolume", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test_volume", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 		Secrets: map[string]string{},
 	}
 	_, err := d.DeleteVolume(context.Background(), req)
@@ -804,11 +773,32 @@ func TestDeleteVolume_Err_HasSecrets(t *testing.T) {
 	require.ErrorContains(t, err, "secrets")
 }
 
+func TestDynamicDeleteVolume_Err_NoResourceGroup(t *testing.T) {
+	d := NewFakeDriver()
+	req := &csi.DeleteVolumeRequest{
+		VolumeId: fmt.Sprintf(volumeIDTemplate,
+			"test_volume", "testFs", "127.0.0.1", "testSubDir", "t", ""),
+	}
+	fakeDynamicProvisioner := &FakeDynamicProvisioner{}
+	d.dynamicProvisioner = fakeDynamicProvisioner
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	d.cloud = azure.GetTestCloud(ctrl)
+	_, err := d.DeleteVolume(context.Background(), req)
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "volume was dynamically created but associated resource group is not specified")
+	require.Empty(t, fakeDynamicProvisioner.fakeCallCount, "unexpected calls made to dynamic provisioner, all calls: %#v", fakeDynamicProvisioner.fakeCallCount)
+}
+
 func TestDeleteVolume_Err_HasSecretsValue(t *testing.T) {
 	d := NewFakeDriver()
 	req := &csi.DeleteVolumeRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"testVolume", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test_volume", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 		Secrets: map[string]string{
 			"test": "test",
 		},
@@ -825,7 +815,7 @@ func TestDeleteVolume_Err_OperationExists(t *testing.T) {
 	d := NewFakeDriver()
 	req := &csi.DeleteVolumeRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"testVolume", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test_volume", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 	}
 	if acquired := d.volumeLocks.TryAcquire(req.GetVolumeId()); !acquired {
 		assert.Fail(t, "Can't acquire volume lock")
@@ -854,7 +844,7 @@ func TestValidateVolumeCapabilities_Success(t *testing.T) {
 	}
 	req := &csi.ValidateVolumeCapabilitiesRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"test", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 		VolumeCapabilities: capabilities,
 	}
 
@@ -893,7 +883,7 @@ func TestValidateVolumeCapabilities_Err_NoVolumeCapabilities(t *testing.T) {
 	d := NewFakeDriver()
 	req := &csi.ValidateVolumeCapabilitiesRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"test", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 		VolumeCapabilities: nil,
 	}
 
@@ -909,7 +899,7 @@ func TestValidateVolumeCapabilities_Err_EmptyVolumeCapabilities(t *testing.T) {
 	d := NewFakeDriver()
 	req := &csi.ValidateVolumeCapabilitiesRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"test", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 		VolumeCapabilities: []*csi.VolumeCapability{},
 	}
 
@@ -937,7 +927,7 @@ func TestValidateVolumeCapabilities_Err_HasSecretes(t *testing.T) {
 	}
 	req := &csi.ValidateVolumeCapabilitiesRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"test", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 		VolumeCapabilities: capabilities,
 		Secrets:            map[string]string{},
 	}
@@ -966,7 +956,7 @@ func TestValidateVolumeCapabilities_Err_HasSecretesValue(t *testing.T) {
 	}
 	req := &csi.ValidateVolumeCapabilitiesRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"test", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 		VolumeCapabilities: capabilities,
 		Secrets:            map[string]string{"test": "test"},
 	}
@@ -997,7 +987,7 @@ func TestValidateVolumeCapabilities_Success_BlockCapabilities(t *testing.T) {
 	}
 	req := &csi.ValidateVolumeCapabilitiesRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"test", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 		VolumeCapabilities: capabilities,
 	}
 
@@ -1044,7 +1034,7 @@ func TestValidateVolumeCapabilities_Success_HasUnsupportedAccessMode(
 	}
 	req := &csi.ValidateVolumeCapabilitiesRequest{
 		VolumeId: fmt.Sprintf(volumeIDTemplate,
-			"test", "testFs", "127.0.0.1", "testSubDir", "test-filesystem", "testResourceGroupName"),
+			"test", "testFs", "127.0.0.1", "testSubDir", "t", "testResourceGroupName"),
 		VolumeCapabilities: capabilities,
 	}
 
@@ -1056,7 +1046,6 @@ func TestValidateVolumeCapabilities_Success_HasUnsupportedAccessMode(
 func TestParseAmlfilesystemProperties_Success(t *testing.T) {
 	properties := map[string]string{
 		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
 		"vnet-name":               "test-vnet-name",
@@ -1066,19 +1055,23 @@ func TestParseAmlfilesystemProperties_Success(t *testing.T) {
 		"sku-name":                "AMLFS-Durable-Premium-40",
 		"identities":              "identity1,identity2",
 		"tags":                    "key1=value1,key2=value2",
-		"zones":                   "zone1,zone2,",
+		"zones":                   "zone1",
 	}
 
 	expected := &AmlFilesystemProperties{
 		ResourceGroupName:    "test-resource-group",
-		AmlFilesystemName:    "test-filesystem",
+		AmlFilesystemName:    "",
 		Location:             "test-location",
 		MaintenanceDayOfWeek: "Monday",
 		TimeOfDayUTC:         "12:00",
 		SKUName:              "AMLFS-Durable-Premium-40",
 		Identities:           []string{"identity1", "identity2"},
-		Tags:                 map[string]string{"key1": "value1", "key2": "value2"},
-		Zones:                []string{"zone1", "zone2"},
+		Tags: map[string]string{
+			"key1":       "value1",
+			"key2":       "value2",
+			createdByTag: azureLustreDriverTag,
+		},
+		Zones: []string{"zone1"},
 		SubnetInfo: SubnetProperties{
 			VnetResourceGroup: "test-vnet-rg",
 			VnetName:          "test-vnet-name",
@@ -1095,7 +1088,6 @@ func TestParseAmlfilesystemProperties_Err_InvalidParameters(t *testing.T) {
 	properties := map[string]string{
 		"invalid-param":           "invalid",
 		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
 		"vnet-name":               "test-vnet-name",
@@ -1103,7 +1095,7 @@ func TestParseAmlfilesystemProperties_Err_InvalidParameters(t *testing.T) {
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "12:00",
 		"sku-name":                "AMLFS-Durable-Premium-40",
-		"zones":                   "zone1,zone2",
+		"zones":                   "zone1",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1115,10 +1107,9 @@ func TestParseAmlfilesystemProperties_Err_InvalidParameters(t *testing.T) {
 	require.ErrorContains(t, err, "invalid-param")
 }
 
-func TestParseAmlfilesystemProperties_Err_MissingMaintenanceDayOfWeek(t *testing.T) {
+func TestParseAmlfilesystemProperties_Err_OnlySingleZoneIsSupported(t *testing.T) {
 	properties := map[string]string{
 		"resource-group-name": "test-resource-group",
-		"amlfilesystem-name":  "test-filesystem",
 		"location":            "test-location",
 		"vnet-resource-group": "test-vnet-rg",
 		"vnet-name":           "test-vnet-name",
@@ -1133,13 +1124,32 @@ func TestParseAmlfilesystemProperties_Err_MissingMaintenanceDayOfWeek(t *testing
 	grpcStatus, ok := status.FromError(err)
 	assert.True(t, ok)
 	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+	require.ErrorContains(t, err, "single zone")
+}
+
+func TestParseAmlfilesystemProperties_Err_MissingMaintenanceDayOfWeek(t *testing.T) {
+	properties := map[string]string{
+		"resource-group-name": "test-resource-group",
+		"location":            "test-location",
+		"vnet-resource-group": "test-vnet-rg",
+		"vnet-name":           "test-vnet-name",
+		"subnet-name":         "test-subnet-name",
+		"time-of-day-utc":     "12:00",
+		"sku-name":            "AMLFS-Durable-Premium-40",
+		"zones":               "zone1",
+	}
+
+	_, err := parseAmlFilesystemProperties(properties)
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	assert.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
 	require.ErrorContains(t, err, "maintenance-day-of-week must be provided")
 }
 
 func TestParseAmlfilesystemProperties_Err_EmptyMaintenanceDayOfWeek(t *testing.T) {
 	properties := map[string]string{
 		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
 		"vnet-name":               "test-vnet-name",
@@ -1147,7 +1157,7 @@ func TestParseAmlfilesystemProperties_Err_EmptyMaintenanceDayOfWeek(t *testing.T
 		"maintenance-day-of-week": "",
 		"time-of-day-utc":         "12:00",
 		"sku-name":                "AMLFS-Durable-Premium-40",
-		"zones":                   "zone1,zone2",
+		"zones":                   "zone1",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1161,7 +1171,6 @@ func TestParseAmlfilesystemProperties_Err_EmptyMaintenanceDayOfWeek(t *testing.T
 func TestParseAmlfilesystemProperties_Err_InvalidMaintenanceDayOfWeek(t *testing.T) {
 	properties := map[string]string{
 		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
 		"vnet-name":               "test-vnet-name",
@@ -1169,7 +1178,7 @@ func TestParseAmlfilesystemProperties_Err_InvalidMaintenanceDayOfWeek(t *testing
 		"maintenance-day-of-week": "invalid-day-of-week",
 		"time-of-day-utc":         "12:00",
 		"sku-name":                "AMLFS-Durable-Premium-40",
-		"zones":                   "zone1,zone2",
+		"zones":                   "zone1",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1183,14 +1192,13 @@ func TestParseAmlfilesystemProperties_Err_InvalidMaintenanceDayOfWeek(t *testing
 func TestParseAmlfilesystemProperties_Err_MissingTimeOfDay(t *testing.T) {
 	properties := map[string]string{
 		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
 		"vnet-name":               "test-vnet-name",
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
 		"sku-name":                "AMLFS-Durable-Premium-40",
-		"zones":                   "zone1,zone2",
+		"zones":                   "zone1",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1204,14 +1212,13 @@ func TestParseAmlfilesystemProperties_Err_MissingTimeOfDay(t *testing.T) {
 func TestParseAmlfilesystemProperties_Err_MissingSku(t *testing.T) {
 	properties := map[string]string{
 		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
 		"vnet-name":               "test-vnet-name",
 		"subnet-name":             "test-subnet-name",
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "12:00",
-		"zones":                   "zone1,zone2",
+		"zones":                   "zone1",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1225,7 +1232,6 @@ func TestParseAmlfilesystemProperties_Err_MissingSku(t *testing.T) {
 func TestParseAmlfilesystemProperties_Err_InvalidTimeOfDay(t *testing.T) {
 	properties := map[string]string{
 		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
 		"vnet-name":               "test-vnet-name",
@@ -1233,7 +1239,7 @@ func TestParseAmlfilesystemProperties_Err_InvalidTimeOfDay(t *testing.T) {
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "11",
 		"sku-name":                "AMLFS-Durable-Premium-40",
-		"zones":                   "zone1,zone2",
+		"zones":                   "zone1",
 	}
 
 	_, err := parseAmlFilesystemProperties(properties)
@@ -1247,7 +1253,6 @@ func TestParseAmlfilesystemProperties_Err_InvalidTimeOfDay(t *testing.T) {
 func TestParseAmlfilesystemProperties_Err_MissingZones(t *testing.T) {
 	properties := map[string]string{
 		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
 		"vnet-name":               "test-vnet-name",
@@ -1268,7 +1273,6 @@ func TestParseAmlfilesystemProperties_Err_MissingZones(t *testing.T) {
 func TestParseAmlfilesystemProperties_Err_InvalidTags(t *testing.T) {
 	properties := map[string]string{
 		"resource-group-name":     "test-resource-group",
-		"amlfilesystem-name":      "test-filesystem",
 		"location":                "test-location",
 		"vnet-resource-group":     "test-vnet-rg",
 		"vnet-name":               "test-vnet-name",
@@ -1276,7 +1280,7 @@ func TestParseAmlfilesystemProperties_Err_InvalidTags(t *testing.T) {
 		"maintenance-day-of-week": "Monday",
 		"time-of-day-utc":         "12:00",
 		"sku-name":                "AMLFS-Durable-Premium-40",
-		"zones":                   "zone1,zone2",
+		"zones":                   "zone1",
 		"tags":                    "key1:value1,=value2",
 	}
 
@@ -1288,66 +1292,105 @@ func TestParseAmlfilesystemProperties_Err_InvalidTags(t *testing.T) {
 	require.ErrorContains(t, err, "are invalid, the format should be: 'key1=value1,key2=value2")
 }
 
+func TestParseAmlfilesystemProperties_Err_ReservedTags(t *testing.T) {
+	testCases := []struct {
+		reservedTag string
+	}{
+		{
+			reservedTag: createdByTag,
+		},
+		{
+			reservedTag: pvNameTag,
+		},
+		{
+			reservedTag: pvcNameTag,
+		},
+		{
+			reservedTag: pvcNamespaceTag,
+		},
+	}
+	for _, tC := range testCases {
+		properties := map[string]string{
+			"resource-group-name":     "test-resource-group",
+			"location":                "test-location",
+			"vnet-resource-group":     "test-vnet-rg",
+			"vnet-name":               "test-vnet-name",
+			"subnet-name":             "test-subnet-name",
+			"maintenance-day-of-week": "Monday",
+			"time-of-day-utc":         "12:00",
+			"sku-name":                "AMLFS-Durable-Premium-40",
+			"zones":                   "zone1",
+		}
+
+		t.Run(tC.reservedTag, func(t *testing.T) {
+			properties["tags"] = fmt.Sprintf("key1=value1,%s=value2", tC.reservedTag)
+			_, err := parseAmlFilesystemProperties(properties)
+			require.Error(t, err)
+			grpcStatus, ok := status.FromError(err)
+			assert.True(t, ok)
+			assert.Equal(t, codes.InvalidArgument, grpcStatus.Code())
+			require.ErrorContains(t, err, "must not contain "+tC.reservedTag+" as a tag")
+		})
+	}
+}
+
 func TestValidateAndPrependVolumeName(t *testing.T) {
 	tests := []struct {
 		desc              string
 		amlFilesystemName string
 		volumeName        string
-		expected          string
+		expected          bool
 	}{
 		{
-			desc:              "valid alpha name",
-			amlFilesystemName: "aqz",
-			volumeName:        "volName",
-			expected:          "volName-aqz",
+			desc:       "valid alpha name",
+			volumeName: "aqz",
+			expected:   true,
 		},
 		{
-			desc:              "valid numeric name",
-			amlFilesystemName: "029",
-			volumeName:        "volName",
-			expected:          "volName-029",
+			desc:       "valid numeric name",
+			volumeName: "029",
+			expected:   true,
 		},
 		{
-			desc:              "max length name",
-			amlFilesystemName: strings.Repeat("a", amlFilesystemNameMaxLength-len("volName-")),
-			volumeName:        "volName",
-			expected:          "volName-" + strings.Repeat("a", amlFilesystemNameMaxLength-len("volName-")),
+			desc:       "max length name",
+			volumeName: strings.Repeat("a", amlFilesystemNameMaxLength),
+			expected:   true,
 		},
 		{
-			desc:              "name too long",
-			amlFilesystemName: strings.Repeat("a", amlFilesystemNameMaxLength-len("volName-")+1),
-			volumeName:        "volName",
-			expected:          "volName-" + strings.Repeat("a", amlFilesystemNameMaxLength-len("volName-")),
+			desc:       "name too long",
+			volumeName: strings.Repeat("a", amlFilesystemNameMaxLength+1),
+			expected:   false,
 		},
 		{
-			desc:              "removes invalid characters when using default name",
-			amlFilesystemName: "!@#$*amlfsName%@#$",
-			volumeName:        "!@#$*volName%@#$",
-			expected:          "volName-azurelustre-csi",
+			desc:       "removes invalid characters when using default name",
+			volumeName: "-!@#$*amlfsName%@#$",
+			expected:   false,
 		},
 		{
-			desc:              "removes non alphanumeric at beginning when using default name",
-			amlFilesystemName: "#",
-			volumeName:        "-_-volName",
-			expected:          "volName-azurelustre-csi",
+			desc:       "removes non alphanumeric at beginning when using default name",
+			volumeName: "#",
+			expected:   false,
 		},
 		{
-			desc:              "truncates when using default name",
-			amlFilesystemName: "#",
-			volumeName:        strings.Repeat("a", amlFilesystemNameMaxLength-len("-azurelustre-csi")+1),
-			expected:          strings.Repeat("a", amlFilesystemNameMaxLength-len("-azurelustre-cs")) + "-azurelustre-cs",
+			desc:       "truncates when using default name",
+			volumeName: "#",
+			expected:   false,
 		},
 		{
-			desc:              "invalid end character",
-			amlFilesystemName: "aq-",
-			volumeName:        "volName",
-			expected:          "volName-azurelustre-csi",
+			desc:       "invalid end character",
+			volumeName: "aq-",
+			expected:   false,
+		},
+		{
+			desc:       "invalid start character",
+			volumeName: "-aq",
+			expected:   false,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
-			result := validateAndPrependVolumeName(test.amlFilesystemName, test.volumeName)
+			result := isValidVolumeName(test.volumeName)
 			assert.Equal(t, test.expected, result, "input: %q, getValidAmlFilesystemName result: %q, expected: %q", test.amlFilesystemName, result, test.expected)
 		})
 	}

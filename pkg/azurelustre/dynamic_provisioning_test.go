@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
+	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -22,42 +25,64 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-var recordedAmlfsConfigurations map[string]armstoragecache.AmlFilesystem
+type mockAmlfsRecorder struct {
+	recordedAmlfsConfigurations map[string]armstoragecache.AmlFilesystem
+	failureBehaviors            []string
+	fakeCallCount               []string
+}
 
 const (
-	expectedMgsAddress              = "127.0.0.3"
-	expectedResourceGroupName       = "fake-resource-group"
-	expectedAmlFilesystemName       = "fake-amlfs"
-	expectedLocation                = "fake-location"
-	expectedAmlFilesystemSubnetSize = 24
-	expectedUsedIPCount             = 10
-	expectedFullIPCount             = 256
-	expectedTotalIPCount            = 256
-	expectedSku                     = "fake-sku"
-	expectedClusterSize             = 48
-	expectedSkuIncrement            = "4"
-	expectedSkuMaximum              = "128"
-	expectedVnetName                = "fake-vnet"
-	expectedAmlFilesystemSubnetName = "fake-subnet-name"
-	expectedAmlFilesystemSubnetID   = "fake-subnet-id"
-	fullVnetName                    = "full-vnet"
-	invalidSku                      = "invalid-sku"
-	missingAmlFilesystemSubnetID    = "missing-subnet-id"
-	vnetListUsageErrorName          = "vnet-list-usage-error"
-	noSubnetInfoName                = "no-subnet-info"
-	immediateCreateFailureName      = "immediate-create-failure"
-	eventualCreateFailureName       = "eventual-create-failure"
-	immediateDeleteFailureName      = "immediate-delete-failure"
-	eventualDeleteFailureName       = "eventual-delete-failure"
-	clusterGetFailureName           = "cluster-get-failure"
-	errorLocation                   = "sku-error-location"
-	noAmlfsSkus                     = "no-amlfs-skus"
-	noAmlfsSkusForLocation          = "no-amlfs-skus-for-location"
-	invalidSkuIncrement             = "invalid-sku-increment"
-	invalidSkuMaximum               = "invalid-sku-maximum"
+	expectedMgsAddress                        = "127.0.0.3"
+	expectedResourceGroupName                 = "fake-resource-group"
+	expectedAmlFilesystemName                 = "fake-amlfs"
+	expectedLocation                          = "fake-location"
+	expectedAmlFilesystemSubnetSize           = 24
+	expectedUsedIPCount                       = 10
+	expectedFullIPCount                       = 256
+	expectedTotalIPCount                      = 256
+	expectedSku                               = "fake-sku"
+	expectedClusterSize                       = 48
+	expectedSkuIncrement                      = "4"
+	expectedSkuMaximum                        = "128"
+	expectedVnetName                          = "fake-vnet"
+	expectedAmlFilesystemSubnetName           = "fake-subnet-name"
+	expectedAmlFilesystemSubnetID             = "fake-subnet-id"
+	fullVnetName                              = "full-vnet"
+	invalidSku                                = "invalid-sku"
+	missingAmlFilesystemSubnetID              = "missing-subnet-id"
+	vnetListUsageErrorName                    = "vnet-list-usage-error"
+	noSubnetInfoName                          = "no-subnet-info"
+	immediateCreateFailureName                = "immediate-create-failure"
+	eventualCreateFailureName                 = "eventual-create-failure"
+	internalExecutionWith200CreateFailureName = "internal-execution-with-200-create-failure"
+	immediateDeleteFailureName                = "immediate-delete-failure"
+	eventualDeleteFailureName                 = "eventual-delete-failure"
+	clusterGetFailureName                     = "cluster-get-failure"
+	errorLocation                             = "sku-error-location"
+	noAmlfsSkus                               = "no-amlfs-skus"
+	noAmlfsSkusForLocation                    = "no-amlfs-skus-for-location"
+	invalidSkuIncrement                       = "invalid-sku-increment"
+	invalidSkuMaximum                         = "invalid-sku-maximum"
+	immediateClusterRequestTimeoutFailureName = "testClusterShouldImmediatelyTimeout"
+	eventualClusterRequestTimeoutFailureName  = "testClusterShouldEventuallyTimeout"
+	clusterRequestRetryDeleteFailureName      = "testClusterShouldFailRetryDelete"
+	clusterIsDeleting                         = "testClusterDeleting"
 
 	quickPollFrequency = 1 * time.Millisecond
 )
+
+func (recorder *mockAmlfsRecorder) recordFakeCall() {
+	pc, _, _, ok := runtime.Caller(2)
+	if !ok {
+		return
+	}
+	fn := runtime.FuncForPC(pc)
+	name := fn.Name()
+	fakeFunctionRegex := regexp.MustCompile(`fake\.\(\*(?<fake>\w*)\)\.dispatch(?<function>\w*)`)
+	matches := fakeFunctionRegex.FindStringSubmatch(name)
+	functionName := matches[1] + "." + matches[2]
+	recorder.fakeCallCount = append(recorder.fakeCallCount, functionName)
+}
 
 func buildExpectedSubnetInfo() SubnetProperties {
 	return SubnetProperties{
@@ -68,12 +93,28 @@ func buildExpectedSubnetInfo() SubnetProperties {
 	}
 }
 
-func newTestDynamicProvisioner(t *testing.T) *DynamicProvisioner {
+func getNextFailureBehavior(recorder *mockAmlfsRecorder) string {
+	var nextFailureBehavior string
+	if len(recorder.failureBehaviors) > 0 {
+		nextFailureBehavior, recorder.failureBehaviors = recorder.failureBehaviors[0], recorder.failureBehaviors[1:]
+	}
+	return nextFailureBehavior
+}
+
+func newMockAmlfsRecorder(failureBehaviors []string) *mockAmlfsRecorder {
+	return &mockAmlfsRecorder{
+		recordedAmlfsConfigurations: make(map[string]armstoragecache.AmlFilesystem),
+		failureBehaviors:            failureBehaviors,
+		fakeCallCount:               []string{},
+	}
+}
+
+func newTestDynamicProvisioner(t *testing.T, recorder *mockAmlfsRecorder) *DynamicProvisioner {
 	dynamicProvisioner := &DynamicProvisioner{
-		amlFilesystemsClient: newFakeAmlFilesystemsClient(t),
-		vnetClient:           newFakeVnetClient(t),
-		mgmtClient:           newFakeMgmtClient(t),
-		skusClient:           newFakeSkusClient(t, ""),
+		amlFilesystemsClient: newFakeAmlFilesystemsClient(t, recorder),
+		vnetClient:           newFakeVnetClient(t, recorder),
+		mgmtClient:           newFakeMgmtClient(t, recorder),
+		skusClient:           newFakeSkusClient(t, recorder),
 		defaultSkuValues:     DefaultSkuValues,
 		pollFrequency:        quickPollFrequency,
 	}
@@ -81,11 +122,11 @@ func newTestDynamicProvisioner(t *testing.T) *DynamicProvisioner {
 	return dynamicProvisioner
 }
 
-func newFakeSkusClient(t *testing.T, failureBehavior string) *armstoragecache.SKUsClient {
+func newFakeSkusClient(t *testing.T, recorder *mockAmlfsRecorder) *armstoragecache.SKUsClient {
 	skusClientFactory, err := armstoragecache.NewClientFactory("fake-subscription-id", &azfake.TokenCredential{},
 		&arm.ClientOptions{
 			ClientOptions: azcore.ClientOptions{
-				Transport: fake.NewSKUsServerTransport(newFakeSkusServer(t, failureBehavior)),
+				Transport: fake.NewSKUsServerTransport(newFakeSkusServer(t, recorder)),
 			},
 		},
 	)
@@ -139,69 +180,70 @@ func newResourceSku(resourceType, skuName, location, increment, maximum string) 
 	return resourceSku
 }
 
-func newFakeSkusServer(_ *testing.T, failureBehavior string) *fake.SKUsServer {
+func newFakeSkusServer(_ *testing.T, recorder *mockAmlfsRecorder) *fake.SKUsServer {
 	fakeSkusServer := fake.SKUsServer{}
 
 	fakeSkusServer.NewListPager = func(_ *armstoragecache.SKUsClientListOptions) azfake.PagerResponder[armstoragecache.SKUsClientListResponse] {
+		recorder.recordFakeCall()
 		resp := azfake.PagerResponder[armstoragecache.SKUsClientListResponse]{}
-		if failureBehavior == errorLocation {
-			resp.AddError(errors.New("fake location error"))
-			return resp
-		}
-		if failureBehavior == noAmlfsSkus {
-			resp.AddPage(http.StatusOK, armstoragecache.SKUsClientListResponse{
-				ResourceSKUsResult: armstoragecache.ResourceSKUsResult{
-					Value: []*armstoragecache.ResourceSKU{
-						newResourceSku("caches", "", expectedLocation, "", ""),
+		nextFailureBehavior := getNextFailureBehavior(recorder)
+		if nextFailureBehavior != "" {
+			switch nextFailureBehavior {
+			case errorLocation:
+				resp.AddError(errors.New("fake location error"))
+				return resp
+			case noAmlfsSkus:
+				resp.AddPage(http.StatusOK, armstoragecache.SKUsClientListResponse{
+					ResourceSKUsResult: armstoragecache.ResourceSKUsResult{
+						Value: []*armstoragecache.ResourceSKU{
+							newResourceSku("caches", "", expectedLocation, "", ""),
+						},
 					},
-				},
-			}, nil)
-			return resp
-		}
-		if failureBehavior == noAmlfsSkusForLocation {
-			otherSkuLocation := "other-sku-location"
-			resp.AddPage(http.StatusOK, armstoragecache.SKUsClientListResponse{
-				ResourceSKUsResult: armstoragecache.ResourceSKUsResult{
-					Value: []*armstoragecache.ResourceSKU{
-						newResourceSku(AmlfsSkuResourceType,
-							expectedSku,
-							otherSkuLocation,
-							expectedSkuIncrement,
-							expectedSkuMaximum),
+				}, nil)
+				return resp
+			case noAmlfsSkusForLocation:
+				otherSkuLocation := "other-sku-location"
+				resp.AddPage(http.StatusOK, armstoragecache.SKUsClientListResponse{
+					ResourceSKUsResult: armstoragecache.ResourceSKUsResult{
+						Value: []*armstoragecache.ResourceSKU{
+							newResourceSku(AmlfsSkuResourceType,
+								expectedSku,
+								otherSkuLocation,
+								expectedSkuIncrement,
+								expectedSkuMaximum),
+						},
 					},
-				},
-			}, nil)
-			return resp
-		}
-		if failureBehavior == invalidSkuIncrement {
-			invalidSkuIncrementValue := "a"
-			resp.AddPage(http.StatusOK, armstoragecache.SKUsClientListResponse{
-				ResourceSKUsResult: armstoragecache.ResourceSKUsResult{
-					Value: []*armstoragecache.ResourceSKU{
-						newResourceSku(AmlfsSkuResourceType,
-							expectedSku,
-							expectedLocation,
-							invalidSkuIncrementValue,
-							expectedSkuMaximum),
+				}, nil)
+				return resp
+			case invalidSkuIncrement:
+				invalidSkuIncrementValue := "a"
+				resp.AddPage(http.StatusOK, armstoragecache.SKUsClientListResponse{
+					ResourceSKUsResult: armstoragecache.ResourceSKUsResult{
+						Value: []*armstoragecache.ResourceSKU{
+							newResourceSku(AmlfsSkuResourceType,
+								expectedSku,
+								expectedLocation,
+								invalidSkuIncrementValue,
+								expectedSkuMaximum),
+						},
 					},
-				},
-			}, nil)
-			return resp
-		}
-		if failureBehavior == invalidSkuMaximum {
-			invalidSkuMaximumValue := "a"
-			resp.AddPage(http.StatusOK, armstoragecache.SKUsClientListResponse{
-				ResourceSKUsResult: armstoragecache.ResourceSKUsResult{
-					Value: []*armstoragecache.ResourceSKU{
-						newResourceSku(AmlfsSkuResourceType,
-							expectedSku,
-							expectedLocation,
-							expectedSkuIncrement,
-							invalidSkuMaximumValue),
+				}, nil)
+				return resp
+			case invalidSkuMaximum:
+				invalidSkuMaximumValue := "a"
+				resp.AddPage(http.StatusOK, armstoragecache.SKUsClientListResponse{
+					ResourceSKUsResult: armstoragecache.ResourceSKUsResult{
+						Value: []*armstoragecache.ResourceSKU{
+							newResourceSku(AmlfsSkuResourceType,
+								expectedSku,
+								expectedLocation,
+								expectedSkuIncrement,
+								invalidSkuMaximumValue),
+						},
 					},
-				},
-			}, nil)
-			return resp
+				}, nil)
+				return resp
+			}
 		}
 		resp.AddPage(http.StatusOK, armstoragecache.SKUsClientListResponse{
 			ResourceSKUsResult: armstoragecache.ResourceSKUsResult{
@@ -220,11 +262,11 @@ func newFakeSkusServer(_ *testing.T, failureBehavior string) *fake.SKUsServer {
 	return &fakeSkusServer
 }
 
-func newFakeVnetClient(t *testing.T) *armnetwork.VirtualNetworksClient {
+func newFakeVnetClient(t *testing.T, recorder *mockAmlfsRecorder) *armnetwork.VirtualNetworksClient {
 	vnetClientFactory, err := armnetwork.NewClientFactory("fake-subscription-id", &azfake.TokenCredential{},
 		&arm.ClientOptions{
 			ClientOptions: azcore.ClientOptions{
-				Transport: networkfake.NewVirtualNetworksServerTransport(newFakeVnetServer(t)),
+				Transport: networkfake.NewVirtualNetworksServerTransport(newFakeVnetServer(t, recorder)),
 			},
 		},
 	)
@@ -237,10 +279,11 @@ func newFakeVnetClient(t *testing.T) *armnetwork.VirtualNetworksClient {
 	return fakeVnetClient
 }
 
-func newFakeVnetServer(_ *testing.T) *networkfake.VirtualNetworksServer {
+func newFakeVnetServer(_ *testing.T, recorder *mockAmlfsRecorder) *networkfake.VirtualNetworksServer {
 	fakeVnetServer := networkfake.VirtualNetworksServer{}
 
 	fakeVnetServer.NewListUsagePager = func(_, vnetName string, _ *armnetwork.VirtualNetworksClientListUsageOptions) azfake.PagerResponder[armnetwork.VirtualNetworksClientListUsageResponse] {
+		recorder.recordFakeCall()
 		resp := azfake.PagerResponder[armnetwork.VirtualNetworksClientListUsageResponse]{}
 
 		if vnetName == vnetListUsageErrorName {
@@ -293,11 +336,11 @@ func newFakeVnetServer(_ *testing.T) *networkfake.VirtualNetworksServer {
 	return &fakeVnetServer
 }
 
-func newFakeMgmtClient(t *testing.T) *armstoragecache.ManagementClient {
+func newFakeMgmtClient(t *testing.T, recorder *mockAmlfsRecorder) *armstoragecache.ManagementClient {
 	mgmtClientFactory, err := armstoragecache.NewClientFactory("fake-subscription-id", &azfake.TokenCredential{},
 		&arm.ClientOptions{
 			ClientOptions: azcore.ClientOptions{
-				Transport: fake.NewManagementServerTransport(newFakeManagementServer(t)),
+				Transport: fake.NewManagementServerTransport(newFakeManagementServer(t, recorder)),
 			},
 		},
 	)
@@ -310,10 +353,11 @@ func newFakeMgmtClient(t *testing.T) *armstoragecache.ManagementClient {
 	return fakeMgmtClient
 }
 
-func newFakeManagementServer(_ *testing.T) *fake.ManagementServer {
+func newFakeManagementServer(_ *testing.T, recorder *mockAmlfsRecorder) *fake.ManagementServer {
 	fakeMgmtServer := fake.ManagementServer{}
 
 	fakeMgmtServer.GetRequiredAmlFSSubnetsSize = func(_ context.Context, options *armstoragecache.ManagementClientGetRequiredAmlFSSubnetsSizeOptions) (azfake.Responder[armstoragecache.ManagementClientGetRequiredAmlFSSubnetsSizeResponse], azfake.ErrorResponder) {
+		recorder.recordFakeCall()
 		errResp := azfake.ErrorResponder{}
 		resp := azfake.Responder[armstoragecache.ManagementClientGetRequiredAmlFSSubnetsSizeResponse]{}
 		if *options.RequiredAMLFilesystemSubnetsSizeInfo.SKU.Name == invalidSku {
@@ -330,11 +374,26 @@ func newFakeManagementServer(_ *testing.T) *fake.ManagementServer {
 	return &fakeMgmtServer
 }
 
-func newFakeAmlFilesystemsClient(t *testing.T) *armstoragecache.AmlFilesystemsClient {
+func createTimeoutErrorResponse() *azcore.ResponseError {
+	e := &azcore.ResponseError{}
+	err := e.UnmarshalJSON([]byte(
+		`{
+			"errorCode": "CreateTimeout",
+			"statusCode": 200,
+			"errorMessage": "Amlfilesystem creation did not complete because an operation timed out.  Delete this amlfilesystem and try again."
+		}`,
+	))
+	if err != nil {
+		return &azcore.ResponseError{StatusCode: http.StatusInternalServerError, ErrorCode: "UNEXPECTED_TEST_FAILURE"}
+	}
+	return e
+}
+
+func newFakeAmlFilesystemsClient(t *testing.T, recorder *mockAmlfsRecorder) *armstoragecache.AmlFilesystemsClient {
 	amlFilesystemsClientFactory, err := armstoragecache.NewClientFactory("fake-subscription-id", &azfake.TokenCredential{},
 		&arm.ClientOptions{
 			ClientOptions: azcore.ClientOptions{
-				Transport: fake.NewAmlFilesystemsServerTransport(newFakeAmlFilesystemsServer(t)),
+				Transport: fake.NewAmlFilesystemsServerTransport(newFakeAmlFilesystemsServer(t, recorder)),
 			},
 		},
 	)
@@ -347,15 +406,21 @@ func newFakeAmlFilesystemsClient(t *testing.T) *armstoragecache.AmlFilesystemsCl
 	return fakeAmlFilesystemsClient
 }
 
-func newFakeAmlFilesystemsServer(_ *testing.T) *fake.AmlFilesystemsServer {
-	recordedAmlfsConfigurations = make(map[string]armstoragecache.AmlFilesystem)
+func newFakeAmlFilesystemsServer(_ *testing.T, recorder *mockAmlfsRecorder) *fake.AmlFilesystemsServer {
 	fakeAmlfsServer := fake.AmlFilesystemsServer{}
 
 	fakeAmlfsServer.BeginDelete = func(_ context.Context, _, amlFilesystemName string, _ *armstoragecache.AmlFilesystemsClientBeginDeleteOptions) (azfake.PollerResponder[armstoragecache.AmlFilesystemsClientDeleteResponse], azfake.ErrorResponder) {
+		recorder.recordFakeCall()
 		errResp := azfake.ErrorResponder{}
 		resp := azfake.PollerResponder[armstoragecache.AmlFilesystemsClientDeleteResponse]{}
 		if amlFilesystemName == immediateDeleteFailureName {
 			errResp.SetError(&azcore.ResponseError{StatusCode: http.StatusConflict})
+			return resp, errResp
+		}
+
+		nextFailureBehavior := getNextFailureBehavior(recorder)
+		if nextFailureBehavior == clusterRequestRetryDeleteFailureName {
+			errResp.SetResponseError(http.StatusInternalServerError, clusterRequestRetryDeleteFailureName)
 			return resp, errResp
 		}
 
@@ -367,13 +432,15 @@ func newFakeAmlFilesystemsServer(_ *testing.T) *fake.AmlFilesystemsServer {
 			return resp, errResp
 		}
 
-		delete(recordedAmlfsConfigurations, amlFilesystemName)
+		delete(recorder.recordedAmlfsConfigurations, amlFilesystemName)
+
 		resp.SetTerminalResponse(http.StatusOK, armstoragecache.AmlFilesystemsClientDeleteResponse{}, nil)
 
 		return resp, errResp
 	}
 
 	fakeAmlfsServer.BeginCreateOrUpdate = func(_ context.Context, _, amlFilesystemName string, amlFilesystem armstoragecache.AmlFilesystem, _ *armstoragecache.AmlFilesystemsClientBeginCreateOrUpdateOptions) (azfake.PollerResponder[armstoragecache.AmlFilesystemsClientCreateOrUpdateResponse], azfake.ErrorResponder) {
+		recorder.recordFakeCall()
 		amlFilesystem.Name = to.Ptr(amlFilesystemName)
 		amlFilesystem.Properties.ClientInfo = &armstoragecache.AmlFilesystemClientInfo{
 			ContainerStorageInterface: (*armstoragecache.AmlFilesystemContainerStorageInterface)(nil),
@@ -388,6 +455,11 @@ func newFakeAmlFilesystemsServer(_ *testing.T) *fake.AmlFilesystemsServer {
 			errResp.SetError(&azcore.ResponseError{StatusCode: http.StatusInternalServerError})
 			return resp, errResp
 		}
+		nextFailureBehavior := getNextFailureBehavior(recorder)
+		if nextFailureBehavior == immediateClusterRequestTimeoutFailureName {
+			errResp.SetError(createTimeoutErrorResponse())
+			return resp, errResp
+		}
 
 		resp.AddNonTerminalResponse(http.StatusCreated, nil)
 		resp.AddNonTerminalResponse(http.StatusOK, nil)
@@ -396,8 +468,20 @@ func newFakeAmlFilesystemsServer(_ *testing.T) *fake.AmlFilesystemsServer {
 			resp.SetTerminalError(http.StatusRequestTimeout, eventualCreateFailureName)
 			return resp, errResp
 		}
+		if amlFilesystemName == internalExecutionWith200CreateFailureName {
+			resp.SetTerminalError(http.StatusOK, "InternalExecutionError")
+			return resp, errResp
+		}
+		if nextFailureBehavior == eventualClusterRequestTimeoutFailureName {
+			resp.SetTerminalError(http.StatusOK, "CreateTimeout")
+			resp.SetTerminalResponse(http.StatusOK, armstoragecache.AmlFilesystemsClientCreateOrUpdateResponse{
+				AmlFilesystem: amlFilesystem,
+			}, nil)
+			recorder.recordedAmlfsConfigurations[amlFilesystemName] = amlFilesystem
+			return resp, errResp
+		}
 
-		recordedAmlfsConfigurations[amlFilesystemName] = amlFilesystem
+		recorder.recordedAmlfsConfigurations[amlFilesystemName] = amlFilesystem
 		resp.SetTerminalResponse(http.StatusOK, armstoragecache.AmlFilesystemsClientCreateOrUpdateResponse{
 			AmlFilesystem: amlFilesystem,
 		}, nil)
@@ -405,6 +489,7 @@ func newFakeAmlFilesystemsServer(_ *testing.T) *fake.AmlFilesystemsServer {
 	}
 
 	fakeAmlfsServer.Get = func(_ context.Context, _, amlFilesystemName string, _ *armstoragecache.AmlFilesystemsClientGetOptions) (azfake.Responder[armstoragecache.AmlFilesystemsClientGetResponse], azfake.ErrorResponder) {
+		recorder.recordFakeCall()
 		var amlFilesystem *armstoragecache.AmlFilesystem
 		errResp := azfake.ErrorResponder{}
 		resp := azfake.Responder[armstoragecache.AmlFilesystemsClientGetResponse]{}
@@ -413,7 +498,7 @@ func newFakeAmlFilesystemsServer(_ *testing.T) *fake.AmlFilesystemsServer {
 			return resp, errResp
 		}
 
-		for _, amlfs := range recordedAmlfsConfigurations {
+		for _, amlfs := range recorder.recordedAmlfsConfigurations {
 			if *amlfs.Name == amlFilesystemName {
 				amlFilesystem = &amlfs
 			}
@@ -422,6 +507,13 @@ func newFakeAmlFilesystemsServer(_ *testing.T) *fake.AmlFilesystemsServer {
 			errResp.SetError(errors.New("ResourceNotFound"))
 			return resp, errResp
 		}
+		amlFilesystem.Properties.ProvisioningState = to.Ptr(armstoragecache.AmlFilesystemProvisioningStateTypeSucceeded)
+
+		nextFailureBehavior := getNextFailureBehavior(recorder)
+		if nextFailureBehavior == clusterIsDeleting {
+			amlFilesystem.Properties.ProvisioningState = to.Ptr(armstoragecache.AmlFilesystemProvisioningStateTypeDeleting)
+		}
+
 		resp.SetResponse(http.StatusOK,
 			armstoragecache.AmlFilesystemsClientGetResponse{
 				AmlFilesystem: *amlFilesystem,
@@ -440,7 +532,8 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	mgsIPAddress, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
 		ResourceGroupName:    expectedResourceGroupName,
@@ -454,14 +547,21 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, expectedMgsAddress, mgsIPAddress)
-	require.Len(t, recordedAmlfsConfigurations, 1)
-	actualAmlFilesystem := recordedAmlfsConfigurations[expectedAmlFilesystemName]
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
+	actualAmlFilesystem := recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName]
 	assert.Equal(t, expectedLocation, *actualAmlFilesystem.Location)
 	assert.Equal(t, expectedAmlFilesystemSubnetID, *actualAmlFilesystem.Properties.FilesystemSubnet)
-	assert.Equal(t, expectedSku, *recordedAmlfsConfigurations[expectedAmlFilesystemName].SKU.Name)
-	assert.Nil(t, recordedAmlfsConfigurations[expectedAmlFilesystemName].Identity)
-	assert.Empty(t, recordedAmlfsConfigurations[expectedAmlFilesystemName].Zones)
-	assert.Empty(t, recordedAmlfsConfigurations[expectedAmlFilesystemName].Tags)
+	assert.Equal(t, expectedSku, *recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].SKU.Name)
+	assert.Nil(t, recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Identity)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Zones)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Tags)
+	expectedCreateCalls := []string{
+		"AmlFilesystemsServerTransport.Get",
+		"ManagementServerTransport.GetRequiredAmlFSSubnetsSize",
+		"VirtualNetworksServerTransport.NewListUsagePager",
+		"AmlFilesystemsServerTransport.BeginCreateOrUpdate",
+	}
+	assert.Equal(t, expectedCreateCalls, recorder.fakeCallCount)
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Success_Tags(t *testing.T) {
@@ -470,7 +570,9 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_Tags(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+
 	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
 		ResourceGroupName: expectedResourceGroupName,
 		AmlFilesystemName: expectedAmlFilesystemName,
@@ -478,20 +580,22 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_Tags(t *testing.T) {
 		SubnetInfo:        buildExpectedSubnetInfo(),
 	})
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 1)
-	assert.Len(t, recordedAmlfsConfigurations[expectedAmlFilesystemName].Tags, len(expectedTags))
-	for tagName, tagValue := range recordedAmlfsConfigurations[expectedAmlFilesystemName].Tags {
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
+	assert.Len(t, recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Tags, len(expectedTags))
+	for tagName, tagValue := range recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Tags {
 		assert.Equal(t, expectedTags[tagName], *tagValue)
 	}
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Success_Zones(t *testing.T) {
-	expectedZones := []string{"zone1", "zone2"}
+	expectedZones := []string{"zone1"}
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+
 	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
 		ResourceGroupName: expectedResourceGroupName,
 		AmlFilesystemName: expectedAmlFilesystemName,
@@ -499,10 +603,10 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_Zones(t *testing.T) {
 		SubnetInfo:        buildExpectedSubnetInfo(),
 	})
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 1)
-	assert.Len(t, recordedAmlfsConfigurations[expectedAmlFilesystemName].Zones, len(expectedZones))
-	for zone := range recordedAmlfsConfigurations[expectedAmlFilesystemName].Zones {
-		assert.Equal(t, expectedZones[zone], *recordedAmlfsConfigurations[expectedAmlFilesystemName].Zones[zone])
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
+	assert.Len(t, recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Zones, len(expectedZones))
+	for zone := range recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Zones {
+		assert.Equal(t, expectedZones[zone], *recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Zones[zone])
 	}
 }
 
@@ -512,7 +616,9 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_Identities(t *testing.T)
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+
 	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
 		ResourceGroupName: expectedResourceGroupName,
 		AmlFilesystemName: expectedAmlFilesystemName,
@@ -520,22 +626,130 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_Identities(t *testing.T)
 		SubnetInfo:        buildExpectedSubnetInfo(),
 	})
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 1)
-	assert.Equal(t, armstoragecache.AmlFilesystemIdentityTypeUserAssigned, *recordedAmlfsConfigurations[expectedAmlFilesystemName].Identity.Type)
-	assert.Len(t, recordedAmlfsConfigurations[expectedAmlFilesystemName].Identity.UserAssignedIdentities, len(expectedIdentities))
-	for identityKey, identityValue := range recordedAmlfsConfigurations[expectedAmlFilesystemName].Identity.UserAssignedIdentities {
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
+	assert.Equal(t, armstoragecache.AmlFilesystemIdentityTypeUserAssigned, *recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Identity.Type)
+	assert.Len(t, recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Identity.UserAssignedIdentities, len(expectedIdentities))
+	for identityKey, identityValue := range recorder.recordedAmlfsConfigurations[expectedAmlFilesystemName].Identity.UserAssignedIdentities {
 		assert.Equal(t, &armstoragecache.UserAssignedIdentitiesValue{}, identityValue)
 		assert.Contains(t, expectedIdentities, identityKey)
 	}
+}
+
+func TestDynamicProvisioner_CreateAmlFilesystem_Success_RetriesOnImmediateClusterTimeout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	recorder := newMockAmlfsRecorder([]string{immediateClusterRequestTimeoutFailureName})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+
+	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
+		ResourceGroupName: expectedResourceGroupName,
+		AmlFilesystemName: expectedAmlFilesystemName,
+		SubnetInfo:        buildExpectedSubnetInfo(),
+	})
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Aborted, grpcStatus.Code())
+	require.ErrorContains(t, err, expectedAmlFilesystemName)
+	require.ErrorContains(t, err, "Deleted failed cluster, retrying cluster creation")
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
+	expectedCreateCalls := []string{
+		"AmlFilesystemsServerTransport.Get",
+		"ManagementServerTransport.GetRequiredAmlFSSubnetsSize",
+		"VirtualNetworksServerTransport.NewListUsagePager",
+		"AmlFilesystemsServerTransport.BeginCreateOrUpdate",
+	}
+	expectedDeleteCall := []string{
+		"AmlFilesystemsServerTransport.BeginDelete",
+	}
+	expectedCalls := slices.Concat(
+		expectedCreateCalls,
+		expectedDeleteCall,
+	)
+	assert.Equal(t, expectedCalls, recorder.fakeCallCount)
+}
+
+func TestDynamicProvisioner_CreateAmlFilesystem_Success_RetriesOnEventualClusterTimeout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	failureBehavior := []string{eventualClusterRequestTimeoutFailureName}
+	recorder := newMockAmlfsRecorder(failureBehavior)
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+
+	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
+		ResourceGroupName: expectedResourceGroupName,
+		AmlFilesystemName: expectedAmlFilesystemName,
+		SubnetInfo:        buildExpectedSubnetInfo(),
+	})
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Aborted, grpcStatus.Code())
+	require.ErrorContains(t, err, expectedAmlFilesystemName)
+	require.ErrorContains(t, err, "Deleted failed cluster, retrying cluster creation")
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
+	expectedCreateCalls := []string{
+		"AmlFilesystemsServerTransport.Get",
+		"ManagementServerTransport.GetRequiredAmlFSSubnetsSize",
+		"VirtualNetworksServerTransport.NewListUsagePager",
+		"AmlFilesystemsServerTransport.BeginCreateOrUpdate",
+	}
+	expectedDeleteCall := []string{
+		"AmlFilesystemsServerTransport.BeginDelete",
+	}
+	expectedCalls := slices.Concat(
+		expectedCreateCalls,
+		expectedDeleteCall,
+	)
+	assert.Equal(t, expectedCalls, recorder.fakeCallCount)
+}
+
+func TestDynamicProvisioner_CreateAmlFilesystem_Err_FailedDeleteOnRetryForClusterTimeout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	failureBehaviors := []string{
+		immediateClusterRequestTimeoutFailureName,
+		clusterRequestRetryDeleteFailureName,
+	}
+	recorder := newMockAmlfsRecorder(failureBehaviors)
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+
+	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
+		ResourceGroupName: expectedResourceGroupName,
+		AmlFilesystemName: clusterRequestRetryDeleteFailureName,
+		SubnetInfo:        buildExpectedSubnetInfo(),
+	})
+	require.Error(t, err)
+	require.ErrorContains(t, err, clusterRequestRetryDeleteFailureName)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations)
+	expectedCreateCalls := []string{
+		"AmlFilesystemsServerTransport.Get",
+		"ManagementServerTransport.GetRequiredAmlFSSubnetsSize",
+		"VirtualNetworksServerTransport.NewListUsagePager",
+		"AmlFilesystemsServerTransport.BeginCreateOrUpdate",
+	}
+	expectedDeleteCall := []string{
+		"AmlFilesystemsServerTransport.BeginDelete",
+	}
+	expectedCalls := slices.Concat(
+		expectedCreateCalls,
+		expectedDeleteCall,
+	)
+	assert.Equal(t, expectedCalls, recorder.fakeCallCount)
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_NilClient(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+
 	dynamicProvisioner.amlFilesystemsClient = nil
-	require.Empty(t, recordedAmlfsConfigurations)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
 		ResourceGroupName: expectedResourceGroupName,
@@ -543,15 +757,16 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_NilClient(t *testing.T) {
 		SubnetInfo:        SubnetProperties{},
 	})
 	require.ErrorContains(t, err, "aml filesystem client is nil")
-	assert.Empty(t, recordedAmlfsConfigurations)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations)
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_EmptySubnetInfo(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
 		ResourceGroupName: expectedResourceGroupName,
@@ -559,15 +774,17 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_EmptySubnetInfo(t *testing.T
 		SubnetInfo:        SubnetProperties{},
 	})
 	require.ErrorContains(t, err, "invalid subnet info")
-	assert.Empty(t, recordedAmlfsConfigurations)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations)
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_EmptyInsufficientCapacity(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	subnetProperties := buildExpectedSubnetInfo()
 	subnetProperties.VnetName = fullVnetName
@@ -579,15 +796,16 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_EmptyInsufficientCapacity(t 
 	})
 	require.ErrorContains(t, err, subnetProperties.SubnetID)
 	require.ErrorContains(t, err, "not enough IP addresses available")
-	assert.Empty(t, recordedAmlfsConfigurations)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations)
 }
 
-func TestDynamicProvisioner_CreateAmlFilesystem_Success_NoCapacityCheckIfClusterExistsBeforeCall(t *testing.T) {
+func TestDynamicProvisioner_CreateAmlFilesystem_Success_NoCapacityCheckIfCurrentClusterStateBeforeCall(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	subnetProperties := buildExpectedSubnetInfo()
 
@@ -597,30 +815,64 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_NoCapacityCheckIfCluster
 		SubnetInfo:        subnetProperties,
 	})
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 1)
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
 
-	exists, err := dynamicProvisioner.ClusterExists(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
+	currentClusterState, err := dynamicProvisioner.currentClusterState(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
 	require.NoError(t, err)
-	require.True(t, exists)
+	require.Equal(t, ClusterStateExists, currentClusterState)
 
 	subnetProperties.VnetName = fullVnetName
 
-	require.Len(t, recordedAmlfsConfigurations, 1)
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
 	_, err = dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
 		ResourceGroupName: expectedResourceGroupName,
 		AmlFilesystemName: expectedAmlFilesystemName,
 		SubnetInfo:        subnetProperties,
 	})
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 1)
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
+}
+
+func TestDynamicProvisioner_CreateAmlFilesystem_Aborted_ClusterIsDeleting(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	failureBehaviors := []string{
+		"", // Succeed on first call
+		clusterIsDeleting,
+	}
+	recorder := newMockAmlfsRecorder(failureBehaviors)
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
+
+	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
+		ResourceGroupName: expectedResourceGroupName,
+		AmlFilesystemName: expectedAmlFilesystemName,
+		SubnetInfo:        buildExpectedSubnetInfo(),
+	})
+	require.NoError(t, err)
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
+
+	_, err = dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
+		ResourceGroupName: expectedResourceGroupName,
+		AmlFilesystemName: expectedAmlFilesystemName,
+		SubnetInfo:        buildExpectedSubnetInfo(),
+	})
+	require.Error(t, err)
+	grpcStatus, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Aborted, grpcStatus.Code())
+	require.ErrorContains(t, err, expectedAmlFilesystemName)
+	require.ErrorContains(t, err, "waiting for deletion to complete")
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_NoSubnetFound(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	subnetProperties := buildExpectedSubnetInfo()
 	subnetProperties.VnetName = noSubnetInfoName
@@ -632,15 +884,16 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_NoSubnetFound(t *testing.T) 
 	})
 	require.ErrorContains(t, err, noSubnetInfoName)
 	require.ErrorContains(t, err, "not found in vnet")
-	assert.Empty(t, recordedAmlfsConfigurations)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations)
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_ImmediateFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	amlFilesystemName := immediateCreateFailureName
 	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
@@ -649,15 +902,16 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_ImmediateFailure(t *testing.
 		SubnetInfo:        buildExpectedSubnetInfo(),
 	})
 	require.ErrorContains(t, err, immediateCreateFailureName)
-	assert.Empty(t, recordedAmlfsConfigurations)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations)
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_EventualFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	amlFilesystemName := eventualCreateFailureName
 	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
@@ -666,15 +920,34 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_EventualFailure(t *testing.T
 		SubnetInfo:        buildExpectedSubnetInfo(),
 	})
 	require.ErrorContains(t, err, eventualCreateFailureName)
-	assert.Empty(t, recordedAmlfsConfigurations)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations)
+}
+
+func TestDynamicProvisioner_CreateAmlFilesystem_Err_InternalExecutionWith200Failure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
+
+	amlFilesystemName := internalExecutionWith200CreateFailureName
+	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
+		ResourceGroupName: expectedResourceGroupName,
+		AmlFilesystemName: amlFilesystemName,
+		SubnetInfo:        buildExpectedSubnetInfo(),
+	})
+	require.ErrorContains(t, err, internalExecutionWith200CreateFailureName)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations)
 }
 
 func TestDynamicProvisioner_DeleteAmlFilesystem_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
 		ResourceGroupName: expectedResourceGroupName,
@@ -683,19 +956,20 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_Success(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 1)
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
 
 	err = dynamicProvisioner.DeleteAmlFilesystem(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
 
 	require.NoError(t, err)
-	assert.Empty(t, recordedAmlfsConfigurations)
+	assert.Empty(t, recorder.recordedAmlfsConfigurations)
 }
 
 func TestDynamicProvisioner_DeleteAmlFilesystem_Err_NilCLient(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	dynamicProvisioner.amlFilesystemsClient = nil
 
 	err := dynamicProvisioner.DeleteAmlFilesystem(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
@@ -706,8 +980,9 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_Err_ImmediateFailure(t *testing.
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	amlFilesystemName := immediateDeleteFailureName
 
@@ -717,19 +992,20 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_Err_ImmediateFailure(t *testing.
 		SubnetInfo:        buildExpectedSubnetInfo(),
 	})
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 1)
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
 
 	err = dynamicProvisioner.DeleteAmlFilesystem(context.Background(), expectedResourceGroupName, amlFilesystemName)
 	require.ErrorContains(t, err, immediateDeleteFailureName)
-	assert.Len(t, recordedAmlfsConfigurations, 1)
+	assert.Len(t, recorder.recordedAmlfsConfigurations, 1)
 }
 
 func TestDynamicProvisioner_DeleteAmlFilesystem_Err_EventualFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	amlFilesystemName := eventualDeleteFailureName
 
@@ -739,11 +1015,11 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_Err_EventualFailure(t *testing.T
 		SubnetInfo:        buildExpectedSubnetInfo(),
 	})
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 1)
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
 
 	err = dynamicProvisioner.DeleteAmlFilesystem(context.Background(), expectedResourceGroupName, amlFilesystemName)
 	require.ErrorContains(t, err, eventualDeleteFailureName)
-	assert.Len(t, recordedAmlfsConfigurations, 1)
+	assert.Len(t, recorder.recordedAmlfsConfigurations, 1)
 }
 
 func TestDynamicProvisioner_DeleteAmlFilesystem_SuccessMultiple(t *testing.T) {
@@ -752,8 +1028,9 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_SuccessMultiple(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
 		ResourceGroupName: expectedResourceGroupName,
 		AmlFilesystemName: expectedAmlFilesystemName,
@@ -766,65 +1043,69 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_SuccessMultiple(t *testing.T) {
 		SubnetInfo:        buildExpectedSubnetInfo(),
 	})
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 2)
+	require.Len(t, recorder.recordedAmlfsConfigurations, 2)
 
 	err = dynamicProvisioner.DeleteAmlFilesystem(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 1)
-	assert.Equal(t, otherAmlFilesystemName, *recordedAmlfsConfigurations[otherAmlFilesystemName].Name)
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
+	assert.Equal(t, otherAmlFilesystemName, *recorder.recordedAmlfsConfigurations[otherAmlFilesystemName].Name)
 }
 
-func TestDynamicProvisioner_ClusterExists_Success(t *testing.T) {
+func TestDynamicProvisioner_CurrentClusterState_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 	_, err := dynamicProvisioner.CreateAmlFilesystem(context.Background(), &AmlFilesystemProperties{
 		ResourceGroupName: expectedResourceGroupName,
 		AmlFilesystemName: expectedAmlFilesystemName,
 		SubnetInfo:        buildExpectedSubnetInfo(),
 	})
 	require.NoError(t, err)
-	require.Len(t, recordedAmlfsConfigurations, 1)
+	require.Len(t, recorder.recordedAmlfsConfigurations, 1)
 
-	exists, err := dynamicProvisioner.ClusterExists(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
+	currentClusterState, err := dynamicProvisioner.currentClusterState(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
 	require.NoError(t, err)
-	assert.True(t, exists)
+	require.Equal(t, ClusterStateExists, currentClusterState)
 }
 
-func TestDynamicProvisioner_ClusterExists_SuccessNotFound(t *testing.T) {
+func TestDynamicProvisioner_CurrentClusterState_SuccessNotFound(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
-	exists, err := dynamicProvisioner.ClusterExists(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
+	currentClusterState, err := dynamicProvisioner.currentClusterState(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
 	require.NoError(t, err)
-	assert.False(t, exists)
+	require.Equal(t, ClusterStateNotFound, currentClusterState)
 }
 
-func TestDynamicProvisioner_ClusterExists_Err(t *testing.T) {
+func TestDynamicProvisioner_CurrentClusterState_Err(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	amlFilesystemName := clusterGetFailureName
-	_, err := dynamicProvisioner.ClusterExists(context.Background(), expectedResourceGroupName, amlFilesystemName)
+	_, err := dynamicProvisioner.currentClusterState(context.Background(), expectedResourceGroupName, amlFilesystemName)
 	assert.ErrorContains(t, err, clusterGetFailureName)
 }
 
-func TestDynamicProvisioner_ClusterExists_ErrNilClient(t *testing.T) {
+func TestDynamicProvisioner_CurrentClusterState_ErrNilClient(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	dynamicProvisioner.amlFilesystemsClient = nil
 
-	_, err := dynamicProvisioner.ClusterExists(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
+	_, err := dynamicProvisioner.currentClusterState(context.Background(), expectedResourceGroupName, expectedAmlFilesystemName)
 	assert.ErrorContains(t, err, "aml filesystem client is nil")
 }
 
@@ -832,7 +1113,8 @@ func TestDynamicProvisioner_CheckSubnetCapacity_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	hasSufficientCapacity, err := dynamicProvisioner.CheckSubnetCapacity(context.Background(), buildExpectedSubnetInfo(), expectedSku, expectedClusterSize)
 	require.NoError(t, err)
@@ -843,7 +1125,8 @@ func TestDynamicProvisioner_CheckSubnetCapacity_FullVnet(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	subnetInfo := buildExpectedSubnetInfo()
 	subnetInfo.VnetName = fullVnetName
@@ -856,7 +1139,8 @@ func TestDynamicProvisioner_CheckSubnetCapacity_Err_NilMgmtClient(t *testing.T) 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	dynamicProvisioner.mgmtClient = nil
 
 	_, err := dynamicProvisioner.CheckSubnetCapacity(context.Background(), buildExpectedSubnetInfo(), expectedSku, expectedClusterSize)
@@ -867,7 +1151,8 @@ func TestDynamicProvisioner_CheckSubnetCapacity_Err_NilVnetClient(t *testing.T) 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	dynamicProvisioner.vnetClient = nil
 
 	_, err := dynamicProvisioner.CheckSubnetCapacity(context.Background(), buildExpectedSubnetInfo(), expectedSku, expectedClusterSize)
@@ -878,8 +1163,9 @@ func TestDynamicProvisioner_CheckSubnetCapacity_Err_InvalidSku(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	require.Empty(t, recordedAmlfsConfigurations)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+	require.Empty(t, recorder.recordedAmlfsConfigurations)
 
 	sku := invalidSku
 	_, err := dynamicProvisioner.CheckSubnetCapacity(context.Background(), buildExpectedSubnetInfo(), sku, expectedClusterSize)
@@ -890,7 +1176,8 @@ func TestDynamicProvisioner_CheckSubnetCapacity_Err_ListUsageError(t *testing.T)
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	subnetInfo := buildExpectedSubnetInfo()
 	subnetInfo.VnetName = vnetListUsageErrorName
@@ -902,7 +1189,8 @@ func TestDynamicProvisioner_CheckSubnetCapacity_Err_SubnetNotFound(t *testing.T)
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	subnetInfo := buildExpectedSubnetInfo()
 	subnetInfo.SubnetID = missingAmlFilesystemSubnetID
@@ -914,7 +1202,8 @@ func TestDynamicProvisioner_GetSkuValuesForLocation_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	expectedSkuValues := map[string]*LustreSkuValue{expectedSku: {IncrementInTib: 4, MaximumInTib: 128}}
 
@@ -928,7 +1217,8 @@ func TestDynamicProvisioner_GetSkuValuesForLocation_NilClientReturnsDefaults(t *
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	dynamicProvisioner.skusClient = nil
 
 	skuValues := dynamicProvisioner.GetSkuValuesForLocation(context.Background(), expectedLocation)
@@ -942,8 +1232,8 @@ func TestDynamicProvisioner_GetSkuValuesForLocation_ErrorResponseReturnsDefaults
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	dynamicProvisioner.skusClient = newFakeSkusClient(t, errorLocation)
+	recorder := newMockAmlfsRecorder([]string{errorLocation})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	skuValues := dynamicProvisioner.GetSkuValuesForLocation(context.Background(), expectedLocation)
 	t.Log(skuValues)
@@ -956,8 +1246,8 @@ func TestDynamicProvisioner_GetSkuValuesForLocation_NoAmlfsSkusReturnsDefaults(t
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	dynamicProvisioner.skusClient = newFakeSkusClient(t, noAmlfsSkus)
+	recorder := newMockAmlfsRecorder([]string{noAmlfsSkus})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	skuValues := dynamicProvisioner.GetSkuValuesForLocation(context.Background(), expectedLocation)
 	t.Log(skuValues)
@@ -970,8 +1260,8 @@ func TestDynamicProvisioner_GetSkuValuesForLocation_NoAmlfsSkusForLocationReturn
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	dynamicProvisioner.skusClient = newFakeSkusClient(t, noAmlfsSkusForLocation)
+	recorder := newMockAmlfsRecorder([]string{noAmlfsSkusForLocation})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	skuValues := dynamicProvisioner.GetSkuValuesForLocation(context.Background(), expectedLocation)
 	t.Log(skuValues)
@@ -984,8 +1274,8 @@ func TestDynamicProvisioner_GetSkuValuesForLocation_SkipsInvalidSkuIncrement(t *
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	dynamicProvisioner.skusClient = newFakeSkusClient(t, invalidSkuIncrement)
+	recorder := newMockAmlfsRecorder([]string{invalidSkuIncrement})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	skuValues := dynamicProvisioner.GetSkuValuesForLocation(context.Background(), expectedLocation)
 	t.Log(skuValues)
@@ -998,8 +1288,8 @@ func TestDynamicProvisioner_GetSkuValuesForLocation_SkipsInvalidSkuMaximum(t *te
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	dynamicProvisioner := newTestDynamicProvisioner(t)
-	dynamicProvisioner.skusClient = newFakeSkusClient(t, invalidSkuMaximum)
+	recorder := newMockAmlfsRecorder([]string{invalidSkuMaximum})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
 	skuValues := dynamicProvisioner.GetSkuValuesForLocation(context.Background(), expectedLocation)
 	t.Log(skuValues)
@@ -1082,6 +1372,16 @@ func TestConvertStatusCodeErrorToGrpcCodeError(t *testing.T) {
 		{
 			name:         "GrpcError",
 			inputError:   status.Error(codes.DeadlineExceeded, "test error"),
+			expectedCode: codes.DeadlineExceeded,
+		},
+		{
+			name:         "InternalExecutionError",
+			inputError:   &azcore.ResponseError{StatusCode: http.StatusOK, ErrorCode: "InternalExecutionError"},
+			expectedCode: codes.Internal,
+		},
+		{
+			name:         "CreateTimeout",
+			inputError:   &azcore.ResponseError{StatusCode: http.StatusOK, ErrorCode: "CreateTimeout"},
 			expectedCode: codes.DeadlineExceeded,
 		},
 		{
