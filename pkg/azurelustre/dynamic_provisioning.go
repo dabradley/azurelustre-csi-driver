@@ -24,6 +24,7 @@ const (
 	ClusterStateExists            ClusterState = "Exists"
 	ClusterStateNotFound          ClusterState = "Not found"
 	ClusterStateDeleting          ClusterState = "Deleting"
+	ClusterStateFailed            ClusterState = "Failed"
 	AmlfsSkuResourceType                       = "amlFilesystems"
 	AmlfsSkuCapacityIncrementName              = "OSS capacity increment (TiB)"
 	AmlfsSkuCapacityMaximumName                = "default maximum capacity (TiB)"
@@ -99,11 +100,9 @@ func convertHTTPResponseErrorToGrpcCodeError(err error) error {
 			// Prefer to default to Unknown rather than Internal so provisioner will retry
 			grpcErrorCode = codes.Unknown
 		}
-	} else if httpError.ErrorCode == "InternalExecutionError" {
-		grpcErrorCode = codes.Internal
-	} else if httpError.ErrorCode == "CreateTimeout" {
+	} else if httpError.ErrorCode == "InternalExecutionError" || httpError.ErrorCode == "CreateTimeout" {
 		// Special case for CreateTimeout to ensure preserve the reason
-		return status.Errorf(codes.DeadlineExceeded, "CreateTimeout: %v", httpError)
+		return status.Errorf(codes.DeadlineExceeded, "%s: %v", httpError.ErrorCode, httpError)
 	}
 
 	return status.Errorf(grpcErrorCode, "error occurred calling API: %v", httpError)
@@ -128,6 +127,8 @@ func (d *DynamicProvisioner) currentClusterState(ctx context.Context, resourceGr
 	if resp.Properties != nil && resp.Properties.ProvisioningState != nil {
 		if *resp.Properties.ProvisioningState == armstoragecache.AmlFilesystemProvisioningStateTypeDeleting {
 			return ClusterStateDeleting, nil
+		} else if *resp.Properties.ProvisioningState == armstoragecache.AmlFilesystemProvisioningStateTypeFailed {
+			return ClusterStateFailed, nil
 		}
 	}
 
@@ -220,8 +221,10 @@ func (d *DynamicProvisioner) CreateAmlFilesystem(ctx context.Context, amlFilesys
 	case ClusterStateDeleting:
 		return "", status.Errorf(codes.Aborted, "AMLFS cluster %s creation did not complete correctly, waiting for deletion to complete before retrying cluster creation",
 			amlFilesystemProperties.AmlFilesystemName)
+	case ClusterStateFailed:
+		klog.V(2).Infof("AMLFS cluster %s is in a failed state, will attempt to correct on new creation", amlFilesystemProperties.AmlFilesystemName)
 	case ClusterStateExists:
-		// TODO: check if the existing cluster has the same configuration
+		// TODO: if we allow reusing AMLFS clusters, we should check  the existing cluster's properties
 		klog.V(2).Infof("AMLFS cluster %s already exists, will attempt update request", amlFilesystemProperties.AmlFilesystemName)
 	}
 
@@ -233,7 +236,11 @@ func (d *DynamicProvisioner) CreateAmlFilesystem(ctx context.Context, amlFilesys
 		amlFilesystem,
 		nil)
 	if err != nil {
-		if checkErrorForRetry(err) {
+		retry, retryErr := d.checkErrorForRetry(ctx, err, amlFilesystemProperties)
+		if retryErr != nil {
+			return "", convertHTTPResponseErrorToGrpcCodeError(retryErr)
+		}
+		if retry {
 			return "", d.tryDeleteBeforeRetry(ctx, amlFilesystemProperties)
 		}
 		return "", convertHTTPResponseErrorToGrpcCodeError(err)
@@ -244,7 +251,11 @@ func (d *DynamicProvisioner) CreateAmlFilesystem(ctx context.Context, amlFilesys
 	}
 	res, err := poller.PollUntilDone(ctx, pollerOptions)
 	if err != nil {
-		if checkErrorForRetry(err) {
+		retry, retryErr := d.checkErrorForRetry(ctx, err, amlFilesystemProperties)
+		if retryErr != nil {
+			return "", convertHTTPResponseErrorToGrpcCodeError(retryErr)
+		}
+		if retry {
 			return "", d.tryDeleteBeforeRetry(ctx, amlFilesystemProperties)
 		}
 		klog.Errorf("failed to poll the result: %v", err)
@@ -267,15 +278,27 @@ func (d *DynamicProvisioner) tryDeleteBeforeRetry(ctx context.Context, amlFilesy
 	return status.Errorf(codes.Aborted, "AMLFS cluster %s creation timed out. Deleted failed cluster, retrying cluster creation", amlFilesystemProperties.AmlFilesystemName)
 }
 
-func checkErrorForRetry(err error) bool {
+func (d *DynamicProvisioner) checkErrorForRetry(ctx context.Context, err error, amlFilesystemProperties *AmlFilesystemProperties) (bool, error) {
 	err = convertHTTPResponseErrorToGrpcCodeError(err)
 	errCode := status.Code(err)
 
 	if errCode == codes.DeadlineExceeded && strings.Contains(err.Error(), "CreateTimeout") {
 		klog.Warningf("AMLFS creation failed due to a creation timeout error, deleting and recreating AMLFS cluster: %v", err)
-		return true
+		return true, nil
 	}
-	return false
+
+	if errCode == codes.DeadlineExceeded && strings.Contains(err.Error(), "InternalExecutionError") {
+		currentClusterState, err := d.currentClusterState(ctx, amlFilesystemProperties.ResourceGroupName, amlFilesystemProperties.AmlFilesystemName)
+		if err != nil {
+			klog.Errorf("error getting current cluster state for cluster %s: %v", amlFilesystemProperties.AmlFilesystemName, err)
+			return false, err
+		}
+		if currentClusterState == ClusterStateFailed {
+			klog.Warningf("AMLFS creation failed due to a failed deployment, deleting and recreating AMLFS cluster: %v", err)
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (d *DynamicProvisioner) GetSkuValuesForLocation(ctx context.Context, location string) map[string]*LustreSkuValue {
