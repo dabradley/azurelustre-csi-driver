@@ -19,9 +19,7 @@ COPY "./pkg/azurelustreplugin/entrypoint.sh" "/app/entrypoint.sh"
 
 RUN chmod +x "/app/entrypoint.sh"
 
-RUN apt-get update && apt --only-upgrade -y install tar libudev1 libsystemd0 libssl3 libc6 libc-bin && apt -y install ca-certificates && apt-get -y upgrade
-
-RUN apt-get clean all
+RUN apt-get update && apt -y install ca-certificates && apt -y upgrade && apt-get clean all
 
 # Install all Lustre packages dependencies
 # RUN apt-get install -y --no-install-recommends ca-certificates curl distro-info-data gpg gpgconf kmod libasn1-8-heimdal           \
