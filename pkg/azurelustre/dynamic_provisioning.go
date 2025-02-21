@@ -181,7 +181,7 @@ func (d *DynamicProvisioner) CreateAmlFilesystem(ctx context.Context, amlFilesys
 			DayOfWeek:    to.Ptr(amlFilesystemProperties.MaintenanceDayOfWeek),
 			TimeOfDayUTC: to.Ptr(amlFilesystemProperties.TimeOfDayUTC),
 		},
-		StorageCapacityTiB: to.Ptr[float32](amlFilesystemProperties.StorageCapacityTiB),
+		StorageCapacityTiB: to.Ptr(amlFilesystemProperties.StorageCapacityTiB),
 	}
 	amlFilesystem := armstoragecache.AmlFilesystem{
 		Location:   to.Ptr(amlFilesystemProperties.Location),
@@ -391,7 +391,7 @@ func (d *DynamicProvisioner) getAmlfsSubnetSize(ctx context.Context, sku string,
 			SKU: &armstoragecache.SKUName{
 				Name: to.Ptr(sku),
 			},
-			StorageCapacityTiB: to.Ptr[float32](clusterSize),
+			StorageCapacityTiB: to.Ptr(clusterSize),
 		},
 	})
 	if err != nil {

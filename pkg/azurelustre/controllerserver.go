@@ -231,13 +231,7 @@ func validateVolumeCapabilities(capabilities []*csi.VolumeCapability) error {
 			return status.Error(codes.InvalidArgument,
 				"Doesn't support block volume.")
 		}
-		support := false
-		for _, supportedCapability := range volumeCapabilities {
-			if capability.GetAccessMode().GetMode() == supportedCapability {
-				support = true
-				break
-			}
-		}
+		support := slices.Contains(volumeCapabilities, capability.GetAccessMode().GetMode())
 		if !support {
 			return status.Error(codes.InvalidArgument,
 				"Volume doesn't support "+

@@ -45,7 +45,7 @@ func TestRoundUpGiB(t *testing.T) {
 func TestSimpleLockEntry(t *testing.T) {
 	testLockMap := NewLockMap()
 
-	callbackChan1 := make(chan interface{})
+	callbackChan1 := make(chan any)
 	go testLockMap.lockAndCallback(t, "entry1", callbackChan1)
 	ensureCallbackHappens(t, callbackChan1)
 }
@@ -53,7 +53,7 @@ func TestSimpleLockEntry(t *testing.T) {
 func TestSimpleLockUnlockEntry(t *testing.T) {
 	testLockMap := NewLockMap()
 
-	callbackChan1 := make(chan interface{})
+	callbackChan1 := make(chan any)
 	go testLockMap.lockAndCallback(t, "entry1", callbackChan1)
 	ensureCallbackHappens(t, callbackChan1)
 	testLockMap.UnlockEntry("entry1")
@@ -62,8 +62,8 @@ func TestSimpleLockUnlockEntry(t *testing.T) {
 func TestConcurrentLockEntry(t *testing.T) {
 	testLockMap := NewLockMap()
 
-	callbackChan1 := make(chan interface{})
-	callbackChan2 := make(chan interface{})
+	callbackChan1 := make(chan any)
+	callbackChan2 := make(chan any)
 
 	go testLockMap.lockAndCallback(t, "entry1", callbackChan1)
 	ensureCallbackHappens(t, callbackChan1)
@@ -76,14 +76,14 @@ func TestConcurrentLockEntry(t *testing.T) {
 	testLockMap.UnlockEntry("entry1")
 }
 
-func (lm *LockMap) lockAndCallback(_ *testing.T, entry string, callbackChan chan<- interface{}) {
+func (lm *LockMap) lockAndCallback(_ *testing.T, entry string, callbackChan chan<- any) {
 	lm.LockEntry(entry)
 	callbackChan <- true
 }
 
 var callbackTimeout = 2 * time.Second
 
-func ensureCallbackHappens(t *testing.T, callbackChan <-chan interface{}) bool {
+func ensureCallbackHappens(t *testing.T, callbackChan <-chan any) bool {
 	t.Helper()
 	select {
 	case <-callbackChan:
@@ -94,7 +94,7 @@ func ensureCallbackHappens(t *testing.T, callbackChan <-chan interface{}) bool {
 	}
 }
 
-func ensureNoCallback(t *testing.T, callbackChan <-chan interface{}) bool {
+func ensureNoCallback(t *testing.T, callbackChan <-chan any) bool {
 	t.Helper()
 	select {
 	case <-callbackChan:
@@ -108,7 +108,7 @@ func ensureNoCallback(t *testing.T, callbackChan <-chan interface{}) bool {
 func TestUnlockEntryNotExists(t *testing.T) {
 	testLockMap := NewLockMap()
 
-	callbackChan1 := make(chan interface{})
+	callbackChan1 := make(chan any)
 	go testLockMap.lockAndCallback(t, "entry1", callbackChan1)
 	ensureCallbackHappens(t, callbackChan1)
 	// entry2 does not exist
