@@ -85,9 +85,9 @@ type DriverOptions struct {
 // Driver implements all interfaces of CSI drivers
 type Driver struct {
 	csicommon.CSIDriver
-	csicommon.DefaultIdentityServer
-	csicommon.DefaultControllerServer
-	csicommon.DefaultNodeServer
+	csi.UnimplementedControllerServer
+	csi.UnimplementedIdentityServer
+	csi.UnimplementedNodeServer
 	// enableAzureLustreMockMount is only for testing, DO NOT set as true in non-testing scenario
 	enableAzureLustreMockMount bool
 	mounter                    *mount.SafeFormatAndMount // TODO_JUSJIN: check any other alternatives
@@ -113,10 +113,6 @@ func NewDriver(options *DriverOptions) *Driver {
 	d.Name = options.DriverName
 	d.Version = driverVersion
 	d.NodeID = options.NodeID
-
-	d.DefaultControllerServer.Driver = &d.CSIDriver
-	d.DefaultIdentityServer.Driver = &d.CSIDriver
-	d.DefaultNodeServer.Driver = &d.CSIDriver
 
 	return &d
 }

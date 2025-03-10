@@ -1210,3 +1210,31 @@ func TestNewLustreVolume(t *testing.T) {
 		})
 	}
 }
+
+func TestNodeStageVolume(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.NodeStageVolumeRequest{}
+	resp, err := d.NodeStageVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	if !reflect.DeepEqual(err, status.Error(codes.Unimplemented, "method NodeStageVolume not implemented")) {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestNodeUnstageVolume(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.NodeUnstageVolumeRequest{}
+	resp, err := d.NodeUnstageVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	if !reflect.DeepEqual(err, status.Error(codes.Unimplemented, "method NodeUnstageVolume not implemented")) {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestNodeExpandVolume(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.NodeExpandVolumeRequest{}
+	resp, err := d.NodeExpandVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, status.Error(codes.Unimplemented, "method NodeExpandVolume not implemented"))
+}

@@ -29,25 +29,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// TODO_JUSJIN: update and add tests
-
-func TestControllerGetCapabilities(t *testing.T) {
-	d := NewFakeDriver()
-	d.AddControllerServiceCapabilities(controllerServiceCapabilities)
-	req := csi.ControllerGetCapabilitiesRequest{}
-	resp, err := d.ControllerGetCapabilities(context.Background(), &req)
-	require.NoError(t, err)
-	assert.NotNil(t, resp)
-	capabilitiesSupported := make([]csi.ControllerServiceCapability_RPC_Type, 0, len(resp.GetCapabilities()))
-	for _, capabilitySupported := range resp.GetCapabilities() {
-		capabilitiesSupported = append(capabilitiesSupported, capabilitySupported.GetRpc().GetType())
-	}
-	slices.Sort(capabilitiesSupported)
-	capabilitiesWanted := controllerServiceCapabilities
-	slices.Sort(capabilitiesWanted)
-	assert.Equal(t, capabilitiesWanted, capabilitiesSupported)
-}
-
 func buildCreateVolumeRequest() *csi.CreateVolumeRequest {
 	req := &csi.CreateVolumeRequest{
 		Name: "test_volume",
@@ -641,4 +622,94 @@ func TestValidateVolumeCapabilities_Success_HasUnsupportedAccessMode(
 	res, err := d.ValidateVolumeCapabilities(context.Background(), req)
 	require.NoError(t, err)
 	assert.Nil(t, res.GetConfirmed())
+}
+
+func TestControllerPublishVolume(t *testing.T) {
+	d := NewFakeDriver()
+	d.AddControllerServiceCapabilities(controllerServiceCapabilities)
+	req := csi.ControllerPublishVolumeRequest{}
+	resp, err := d.ControllerPublishVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, status.Error(codes.Unimplemented, "method ControllerPublishVolume not implemented"))
+}
+
+func TestControllerUnpublishVolume(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ControllerUnpublishVolumeRequest{}
+	resp, err := d.ControllerUnpublishVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, status.Error(codes.Unimplemented, "method ControllerUnpublishVolume not implemented"))
+}
+
+func TestGetCapacity(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.GetCapacityRequest{}
+	resp, err := d.GetCapacity(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, status.Error(codes.Unimplemented, "method GetCapacity not implemented"))
+}
+
+func TestListVolumes(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ListVolumesRequest{}
+	resp, err := d.ListVolumes(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, status.Error(codes.Unimplemented, "method ListVolumes not implemented"))
+}
+
+func TestCreateSnapshot(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.CreateSnapshotRequest{}
+	resp, err := d.CreateSnapshot(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, status.Error(codes.Unimplemented, "method CreateSnapshot not implemented"))
+}
+
+func TestDeleteSnapshot(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.DeleteSnapshotRequest{}
+	resp, err := d.DeleteSnapshot(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, status.Error(codes.Unimplemented, "method DeleteSnapshot not implemented"))
+}
+
+func TestListSnapshots(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ListSnapshotsRequest{}
+	resp, err := d.ListSnapshots(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, status.Error(codes.Unimplemented, "method ListSnapshots not implemented"))
+}
+
+func TestControllerExpandVolume(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ControllerExpandVolumeRequest{}
+	resp, err := d.ControllerExpandVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, status.Error(codes.Unimplemented, "method ControllerExpandVolume not implemented"))
+}
+
+func TestControllerGetVolume(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ControllerGetVolumeRequest{}
+	resp, err := d.ControllerGetVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, status.Error(codes.Unimplemented, "method ControllerGetVolume not implemented"))
+}
+
+func TestControllerGetCapabilities(t *testing.T) {
+	d := NewFakeDriver()
+	d.AddControllerServiceCapabilities(controllerServiceCapabilities)
+	req := csi.ControllerGetCapabilitiesRequest{}
+	resp, err := d.ControllerGetCapabilities(context.Background(), &req)
+	require.NoError(t, err)
+	assert.NotNil(t, resp)
+	capabilitiesSupported := make([]csi.ControllerServiceCapability_RPC_Type, 0, len(resp.GetCapabilities()))
+	for _, capabilitySupported := range resp.GetCapabilities() {
+		capabilitiesSupported = append(capabilitiesSupported, capabilitySupported.GetRpc().GetType())
+	}
+	slices.Sort(capabilitiesSupported)
+	capabilitiesWanted := controllerServiceCapabilities
+	slices.Sort(capabilitiesWanted)
+	assert.Equal(t, capabilitiesWanted, capabilitiesSupported)
 }
