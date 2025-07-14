@@ -153,3 +153,115 @@ Platform: linux/amd64
 $ chmod +x ./azurelustre_log.sh
 $ ./azurelustre_log.sh > lustre.logs 2>&1
 ```
+
+&nbsp;
+
+### Case#3: dynamic provisioning issue (AMLFS cluster creation failure)
+
+&nbsp;
+
+- Symptoms
+  - PVC remains in Pending status for extended periods (more than 15-20 minutes)
+  - Dynamic provisioning StorageClass is configured but AMLFS cluster is not created
+  - PVC events show provisioning errors or timeouts
+
+&nbsp;
+
+- Check PVC status and events
+
+```console
+$ kubectl describe pvc <pvc-name>
+```
+
+Look for events such as:
+- `waiting for a volume to be created`
+- `failed to provision volume`
+- `error creating AMLFS cluster`
+
+&nbsp;
+
+- Check controller logs for dynamic provisioning errors
+
+```console
+$ kubectl logs -n kube-system -l app=csi-azurelustre-controller -c azurelustre --tail=100 | grep -i "dynamic\|provision\|amlfs\|create"
+```
+
+Common error patterns to look for:
+- Authentication/authorization errors
+- Quota exceeded errors
+- Network/subnet configuration issues
+- Invalid StorageClass parameters
+
+&nbsp;
+
+- Verify StorageClass configuration
+
+```console
+$ kubectl get storageclass <storageclass-name> -o yaml
+```
+
+Check for:
+- Correct provisioner: `azurelustre.csi.azure.com`
+- Valid SKU name, zone, and maintenance window parameters
+- Proper network configuration (vnet-name, subnet-name, etc.)
+- Resource group and location settings
+
+&nbsp;
+
+- Check Azure subscription quotas and limits
+
+```console
+# Check if you've reached the AMLFS cluster limit in your subscription
+$ kubectl logs -n kube-system -l app=csi-azurelustre-controller -c azurelustre --tail=200 | grep -i "quota\|limit\|insufficient"
+```
+
+&nbsp;
+
+- Verify Azure permissions for the kubelet identity
+
+The kubelet identity needs the following permissions:
+- `Microsoft.StorageCache/amlFilesystems/read`
+- `Microsoft.StorageCache/amlFilesystems/write`
+- `Microsoft.StorageCache/amlFilesystems/delete`
+- `Microsoft.Network/virtualNetworks/subnets/read`
+- `Microsoft.Network/virtualNetworks/subnets/join/action`
+
+Check for permission errors in the controller logs:
+```console
+$ kubectl logs -n kube-system -l app=csi-azurelustre-controller -c azurelustre --tail=200 | grep -i "forbidden\|unauthorized\|permission"
+```
+
+&nbsp;
+
+- Monitor AMLFS cluster creation progress in Azure portal
+
+1. Navigate to Azure portal → Resource Groups
+2. Look for the resource group specified in StorageClass (or AKS infrastructure RG if not specified)
+3. Check if AMLFS cluster resource is being created
+4. Review Activity Log for any deployment failures
+
+&nbsp;
+
+- Check for network connectivity issues
+
+```console
+# Verify the specified virtual network and subnet exist and are accessible
+$ kubectl logs -n kube-system -l app=csi-azurelustre-controller -c azurelustre --tail=200 | grep -i "network\|subnet\|vnet"
+```
+
+Common network issues:
+- Virtual network or subnet doesn't exist
+- Insufficient IP addresses in the subnet
+- Network security group blocking traffic
+- Missing virtual network peering
+
+&nbsp;
+
+- Force retry dynamic provisioning
+
+If the issue is transient, you can delete and recreate the PVC:
+
+```console
+$ kubectl delete pvc <pvc-name>
+$ kubectl apply -f <pvc-file>.yaml
+```
