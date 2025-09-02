@@ -67,7 +67,7 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: azurelustre
-          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.3.1
+          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-jammy
           imagePullPolicy: Always
           args:
             - "-v=5"
@@ -101,8 +101,6 @@ spec:
               name: socket-dir
             - mountPath: /etc/kubernetes/
               name: azure-cred
-            - mountPath: /etc/host-os-release
-              name: host-os-release
           resources:
             limits:
               cpu: 1
@@ -117,7 +115,3 @@ spec:
           hostPath:
             path: /etc/kubernetes/
             type: DirectoryOrCreate
-        - name: host-os-release
-          hostPath:
-            path: /etc/os-release
-            type: File

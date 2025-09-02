@@ -2,7 +2,7 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: csi-azurelustre-node
+  name: csi-azurelustre-node-jammy
   namespace: kube-system
 spec:
   updateStrategy:
@@ -12,10 +12,12 @@ spec:
   selector:
     matchLabels:
       app: csi-azurelustre-node
+      flavor: jammy
   template:
     metadata:
       labels:
         app: csi-azurelustre-node
+        flavor: jammy
     spec:
       hostNetwork: true
       dnsPolicy: Default
@@ -31,6 +33,11 @@ spec:
                     operator: NotIn
                     values:
                       - virtual-kubelet
+                  - key: kubernetes.azure.com/os-sku-effective
+                    operator: In
+                    values:
+                      - Ubuntu2204
+                      - Ubuntu2004  # To support CVM nodes still on 20.04
       priorityClassName: system-node-critical
       tolerations:
         - operator: "Exists"
@@ -84,7 +91,7 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: azurelustre
-          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.3.1
+          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-jammy
           imagePullPolicy: Always
           lifecycle:
             preStop:
@@ -152,6 +159,8 @@ spec:
               name: azure-cred
             - mountPath: /dev
               name: host-dev
+            - mountPath: /etc/host-os-release
+              name: host-os-release
           resources:
             limits:
               cpu: 1
@@ -180,3 +189,7 @@ spec:
             path: /dev
             type: Directory
           name: host-dev
+        - hostPath:
+            path: /etc/os-release
+            type: File
+          name: host-os-release

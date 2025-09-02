@@ -18,9 +18,14 @@ set -euo pipefail
 
 repo="$(git rev-parse --show-toplevel)/deploy"
 
+for i in $(kubectl get daemonsets.apps -n kube-system -o name | grep -F 'csi-azurelustre-node'); do
+  kubectl delete -n kube-system $i
+done
+
 echo "Uninstalling Azure Lustre CSI driver, repo: $repo ..."
 kubectl delete -f $repo/csi-azurelustre-controller.yaml --ignore-not-found
-kubectl delete -f $repo/csi-azurelustre-node.yaml --ignore-not-found
+kubectl delete -f $repo/csi-azurelustre-node-jammy.yaml --ignore-not-found
+kubectl delete -f $repo/csi-azurelustre-node-noble.yaml --ignore-not-found
 kubectl delete -f $repo/csi-azurelustre-driver.yaml --ignore-not-found
 kubectl delete -f $repo/rbac-csi-azurelustre-controller.yaml --ignore-not-found
 kubectl delete -f $repo/rbac-csi-azurelustre-node.yaml --ignore-not-found

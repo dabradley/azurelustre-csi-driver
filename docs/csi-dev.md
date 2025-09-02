@@ -32,11 +32,10 @@ $ make verify
 
 &nbsp;
 
-- Build container image and push to dockerhub
+- Build container image and push to ACR
 
 ```console
-$ export REGISTRY_NAME=<dockerhub-alias>
-$ make push-latest
+$ REGISTRY="<acr-name>.azurecr.io" make build-push-latest
 ```
 
 &nbsp;

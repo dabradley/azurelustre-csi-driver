@@ -38,8 +38,14 @@ fast_exit () {
 
 reset_csi_driver () {
     echo "Reset CSI driver"
+
+    for i in $(kubectl get daemonsets.apps -n kube-system -o name | grep -F 'csi-azurelustre-node'); do
+        kubectl delete -n kube-system $i
+    done
+
     kubectl delete -f $REPO_ROOT_PATH/deploy/csi-azurelustre-controller.yaml --ignore-not-found
-    kubectl delete -f $REPO_ROOT_PATH/deploy/csi-azurelustre-node.yaml --ignore-not-found
+    kubectl delete -f $REPO_ROOT_PATH/deploy/csi-azurelustre-node-jammy.yaml --ignore-not-found
+    kubectl delete -f $REPO_ROOT_PATH/deploy/csi-azurelustre-node-noble.yaml --ignore-not-found
     kubectl wait pod -n kube-system --for=delete --selector='app in (csi-azurelustre-controller,csi-azurelustre-node)' --timeout=600s
 
 
@@ -53,7 +59,8 @@ reset_csi_driver () {
     }
 
     kubectl apply -f $REPO_ROOT_PATH/deploy/csi-azurelustre-controller.yaml
-    kubectl apply -f $REPO_ROOT_PATH/deploy/csi-azurelustre-node.yaml
+    kubectl apply -f $REPO_ROOT_PATH/deploy/csi-azurelustre-node-jammy.yaml
+    kubectl apply -f $REPO_ROOT_PATH/deploy/csi-azurelustre-node-noble.yaml
 
     kubectl wait pod -n kube-system --for=condition=Ready --selector='app in (csi-azurelustre-controller,csi-azurelustre-node)' --timeout=600s
 
