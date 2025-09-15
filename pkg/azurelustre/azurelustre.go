@@ -320,13 +320,7 @@ func (d *Driver) Run(endpoint string, testBool bool) {
 	d.AddVolumeCapabilityAccessModes(volumeCapabilities)
 	d.AddNodeServiceCapabilities(nodeServiceCapabilities)
 
-	// Remove taint from node to indicate driver startup success
-	// This is done at the last possible moment to prevent race conditions or false positive removals
-	if d.kubeClient != nil && d.removeNotReadyTaint && d.NodeID != "" {
-		time.AfterFunc(d.taintRemovalInitialDelay, func() {
-			removeTaintInBackground(d.kubeClient, d.NodeID, d.Name, d.taintRemovalBackoff, removeNotReadyTaint)
-		})
-	}
+	d.removeNotReadyTaintIfNeeded()
 
 	s := csicommon.NewNonBlockingGRPCServer()
 	// Driver d act as IdentityServer, ControllerServer and NodeServer
@@ -385,8 +379,17 @@ type JSONPatch struct {
 	Value interface{} `json:"value,omitempty"`
 }
 
+func (d *Driver) removeNotReadyTaintIfNeeded() {
+	// Remove taint from node to indicate driver startup success
+	// This is done at the last possible moment to prevent race conditions or false positive removals
+	if d.kubeClient != nil && d.removeNotReadyTaint && d.NodeID != "" {
+		time.AfterFunc(d.taintRemovalInitialDelay, func() {
+			removeTaintInBackground(d.kubeClient, d.NodeID, d.Name, d.taintRemovalBackoff, removeNotReadyTaint)
+		})
+	}
+}
+
 // removeTaintInBackground removes the taint from the node in a goroutine with retry logic
-// TODO: We could test this properly with synctest when we move to go 1.25
 func removeTaintInBackground(k8sClient kubernetes.Interface, nodeName, driverName string, backoff wait.Backoff, removalFunc func(kubernetes.Interface, string, string) error) {
 	klog.V(2).Infof("starting background node taint removal for node %s", nodeName)
 	go func() {
