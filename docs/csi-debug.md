@@ -955,7 +955,15 @@ kubectl exec -it csi-azurelustre-node-9ds7f -n kube-system -c azurelustre -- mou
 172.18.8.12@tcp:/lustrefs on /var/lib/kubelet/pods/6632349a-05fd-466f-bc8a-8946617089ce/volumes/kubernetes.io~csi/pvc-841498d9-fa63-418c-8cc7-d94ec27f2ee2/mount type lustre (rw,flock,lazystatfs,encrypt)
 ```
 
-> **Note:** It is expected for each mount mount to be listed twice
+> **Note:** It is expected for each mount point to be listed twice
+
+**Reachability is checked before mounting.** Before mounting, the driver checks reachability in two stages: a fast TCP dial to the LNet acceptor port (default `988`), then an `lnetctl ping`. A wrong or unreachable MGS IP fails the dial within about 5 seconds; if a port is open but the peer is not a healthy LNet endpoint, the `lnetctl ping` stage can take up to about 50 seconds before failing. If the MGS is unreachable, `NodePublishVolume` fails fast with a `FailedPrecondition` error (`MGS IP address ... is not reachable`) instead of letting the mount hang. Reproduce the same `lnetctl ping` the driver performs:
+
+```sh
+kubectl exec -it csi-azurelustre-node-jammy-9ds7f -n kube-system -c azurelustre -- lnetctl ping <mgs-ip>@tcp
+```
+
+> **Note:** The ping result is cached for about 20 seconds, so once connectivity is restored the mount will recover on retry.
 
 Check for solutions in [Resolving Common Errors](errors.md)
 

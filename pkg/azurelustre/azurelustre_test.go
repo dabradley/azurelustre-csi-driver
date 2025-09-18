@@ -77,6 +77,7 @@ func NewFakeDriver(t *testing.T) *Driver {
 	driver.location = driverDefaultLocation
 	driver.resourceGroup = "defaultFakeResourceGroup"
 	driver.dynamicProvisioner = &FakeDynamicProvisioner{}
+	driver.pingChecker = &fakePingChecker{}
 
 	return driver
 }
@@ -94,6 +95,34 @@ func writeFakeCloudConfig(t *testing.T) string {
 }`
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	return path
+}
+
+type FakeCommandRunner struct {
+	CalledCommands []string
+	cmdShouldFail  bool
+}
+
+func NewFakeCommandRunner(shouldFail bool) *FakeCommandRunner {
+	return &FakeCommandRunner{
+		CalledCommands: []string{},
+		cmdShouldFail:  shouldFail,
+	}
+}
+
+func (f *FakeCommandRunner) RunWithTimeout(_ context.Context, _ time.Duration, cmd string, args ...string) (string, error) {
+	f.CalledCommands = append(f.CalledCommands, fmt.Sprintf("%s %s", cmd, strings.Join(args, " ")))
+	if f.cmdShouldFail {
+		return "", errors.New("error occurred calling command: " + cmd)
+	}
+	return "fake command output", nil
+}
+
+type fakePingChecker struct {
+	err error
+}
+
+func (f *fakePingChecker) EnsureReachable(_ string) error {
+	return f.err
 }
 
 type FakeDynamicProvisioner struct {
