@@ -12,18 +12,37 @@ This driver allows Kubernetes to access Azure Lustre file system.
 
 &nbsp;
 
-### Container Images & Kubernetes Compatibility:
+### Container Images & CSI Driver Versions
 
-| Driver version  | Image                                                           | Supported k8s version | Lustre client version |
-|-----------------|-----------------------------------------------------------------|-----------------------|-----------------------|
-| main branch     | mcr.microsoft.com/oss/kubernetes-csi/azurelustre-csi:latest     | 1.21+                 | 2.15.5                |
-| v0.1.11         | mcr.microsoft.com/oss/kubernetes-csi/azurelustre-csi:v0.1.11    | 1.21+                 | 2.15.1                |
-| v0.1.14         | mcr.microsoft.com/oss/kubernetes-csi/azurelustre-csi:v0.1.14    | 1.21+                 | 2.15.3                |
-| v0.1.15         | mcr.microsoft.com/oss/kubernetes-csi/azurelustre-csi:v0.1.15    | 1.21+                 | 2.15.4                |
-| v0.1.17         | mcr.microsoft.com/oss/kubernetes-csi/azurelustre-csi:v0.1.17    | 1.21+                 | 2.15.5                |
-| v0.1.18         | mcr.microsoft.com/oss/kubernetes-csi/azurelustre-csi:v0.1.18    | 1.21+                 | 2.15.5                |
-| v0.2.0          | mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.2.0  | 1.21+                 | 2.15.5                |
-| v0.3.0          | mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.3.0  | 1.21+                 | 2.15.5                |
+#### Latest Release
+| Driver Version | Image | Lustre Client | Features |
+|----------------|-------|---------------|----------|
+| **v0.3.1** (Recommended) | `mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.3.1` | 2.15.7 | Static + Dynamic Provisioning |
+
+#### Installation
+```bash
+# Install latest stable release
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/azurelustre-csi-driver/v0.3.1/deploy/install-driver.sh
+```
+
+> **Note:** For AMLFS compatibility, ensure your Lustre client version is compatible with your AMLFS cluster version. See [client installation](https://learn.microsoft.com/en-us/azure/azure-managed-lustre/client-install) for details.
+
+<details>
+<summary>Previous Releases</summary>
+
+| Version | Lustre Client | Notable Changes |
+|---------|---------------|-----------------|
+| v0.3.1  | 2.15.7 | Updated Lustre client to 2.15.7 |
+| v0.3.0  | 2.15.5 | Added dynamic provisioning (preview) |
+| v0.2.0  | 2.15.5 | Updated to v2 MCR path |
+| v0.1.18 | 2.15.5 | Stability improvements |
+| v0.1.17 | 2.15.5 | Updated Lustre client |
+| v0.1.15 | 2.15.4 | Bug fixes |
+| v0.1.14 | 2.15.3 | Performance improvements |
+| v0.1.11 | 2.15.1 | Initial stable release |
+
+See the [full release history](https://github.com/kubernetes-sigs/azurelustre-csi-driver/releases) for details.
+</details>
 
 &nbsp;
 
