@@ -2,7 +2,7 @@ apiVersion: v1
 entries:
   azurelustre-csi-driver:
   - apiVersion: v1
-    appVersion: v0.3.0
+    appVersion: v0.4.0
     created: "2025-10-13T20:04:40.359792859+02:00"
     description: Azure Lustre CSI Driver Helm chart
     digest: 9945f25e934688b8d080bb0c6adcd3d4316421638154c22dbb221a0920a3d683
@@ -13,8 +13,8 @@ entries:
     - lustre
     name: azurelustre-csi-driver
     urls:
-    - https://raw.githubusercontent.com/wolfgang-desalvador/azurelustre-csi-driver/refs/heads/wdesalvador/add-helm-chart-support/charts/v0.3.0/azurelustre-csi-driver-0.3.0.tgz
-    version: 0.3.0
+    - https://raw.githubusercontent.com/dabradley/azurelustre-csi-driver/refs/heads/dabradley/add-helm-chart-support/charts/v0.4.0/azurelustre-csi-driver-0.4.0.tgz
+    version: 0.4.0
   - apiVersion: v1
     appVersion: latest
     created: "2025-10-13T20:04:40.352317144+02:00"
@@ -27,6 +27,6 @@ entries:
     - lustre
     name: azurelustre-csi-driver
     urls:
-    - https://raw.githubusercontent.com/wolfgang-desalvador/azurelustre-csi-driver/refs/heads/wdesalvador/add-helm-chart-support/charts/latest/azurelustre-csi-driver-v0.0.0.tgz
+    - https://raw.githubusercontent.com/dabradley/azurelustre-csi-driver/refs/heads/dabradley/add-helm-chart-support/charts/latest/azurelustre-csi-driver-v0.0.0.tgz
     version: v0.0.0
 generated: "2025-10-13T20:04:40.343513652+02:00"

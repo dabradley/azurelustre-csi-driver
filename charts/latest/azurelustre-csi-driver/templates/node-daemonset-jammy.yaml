@@ -1,10 +1,12 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: {{ include "azurelustre.fullname" . }}-node
+  name: {{ include "azurelustre.fullname" . }}-node-jammy
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/component: node
+    app: csi-azurelustre-node
+    flavor: jammy
     {{- include "azurelustre.labels" . | nindent 4 }}
 spec:
   updateStrategy:
@@ -14,10 +16,14 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/component: node
+      app: csi-azurelustre-node
+      flavor: jammy
   template:
     metadata:
       labels:
         app.kubernetes.io/component: node
+        app: csi-azurelustre-node
+        flavor: jammy
         {{- include "azurelustre.labels" . | nindent 8 }}
     spec:
       hostNetwork: true
@@ -34,6 +40,11 @@ spec:
                     operator: NotIn
                     values:
                       - virtual-kubelet
+                  - key: kubernetes.azure.com/os-sku-effective
+                    operator: In
+                    values:
+                      - Ubuntu2204
+                      - Ubuntu2004 # To support CVM nodes still on 20.04
       priorityClassName: {{ .Values.node.priorityClassName }}
       tolerations:
 {{ toYaml .Values.node.tolerations | indent 8 }}
@@ -56,7 +67,7 @@ spec:
             - --csi-address=$(ADDRESS)
             - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
 {{- range $arg := .Values.sidecars.nodeDriverRegistrar.extraArgs }}
-            - {{ $arg | quote }}
+            - {{ $arg | quote}}
 {{- end }}
           livenessProbe:
             exec:
@@ -79,7 +90,7 @@ spec:
           resources:
 {{ toYaml .Values.sidecars.nodeDriverRegistrar.resources | indent 12 }}
         - name: azurelustre
-          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}-jammy
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           lifecycle:
             preStop:
@@ -103,15 +114,31 @@ spec:
             initialDelaySeconds: 60
             timeoutSeconds: 10
             periodSeconds: 30
+          readinessProbe:
+            failureThreshold: 5
+            exec:
+              command:
+                - /app/readinessProbe.sh
+            initialDelaySeconds: 10
+            timeoutSeconds: 10
+            periodSeconds: 30
+          startupProbe:
+            failureThreshold: 120
+            exec:
+              command:
+                - /app/readinessProbe.sh
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 5
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
             - name: AZURELUSTRE_CSI_INSTALL_LUSTRE_CLIENT
               value: {{ ternary "yes" "no" .Values.node.lustreClient.install | quote }}
             - name: LUSTRE_VERSION
-              value: {{ .Values.node.lustreClient.version | quote }}
+              value: {{ .Values.node.lustreClient.jammy.version | quote }}
             - name: CLIENT_SHA_SUFFIX
-              value: {{ .Values.node.lustreClient.shaSuffix | quote }}
+              value: {{ .Values.node.lustreClient.jammy.shaSuffix | quote }}
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -129,6 +156,8 @@ spec:
               name: azure-cred
             - mountPath: {{ .Values.paths.dev }}
               name: host-dev
+            - mountPath: /etc/host-os-release
+              name: host-os-release
           resources:
 {{ toYaml .Values.node.resources | indent 12 }}
       volumes:
@@ -152,3 +181,7 @@ spec:
             path: {{ .Values.paths.dev }}
             type: Directory
           name: host-dev
+        - hostPath:
+            path: {{ .Values.paths.osRelease }}
+            type: File
+          name: host-os-release
