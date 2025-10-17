@@ -4,6 +4,12 @@ apiVersion: apps/v1
 metadata:
   name: csi-azurelustre-node-jammy
   namespace: kube-system
+  labels:
+    app.kubernetes.io/component: node
+    app.kubernetes.io/name: azurelustre-csi-driver
+    app.kubernetes.io/part-of: azurelustre-csi-driver
+    app: csi-azurelustre-node
+    flavor: jammy
 spec:
   updateStrategy:
     rollingUpdate:
@@ -11,12 +17,16 @@ spec:
     type: RollingUpdate
   selector:
     matchLabels:
+      app.kubernetes.io/component: node
       app: csi-azurelustre-node
       flavor: jammy
   template:
     metadata:
       labels:
         app: csi-azurelustre-node
+        app.kubernetes.io/component: node
+        app.kubernetes.io/name: azurelustre-csi-driver
+        app.kubernetes.io/part-of: azurelustre-csi-driver
         flavor: jammy
     spec:
       hostNetwork: true
@@ -40,7 +50,7 @@ spec:
                       - Ubuntu2004  # To support CVM nodes still on 20.04
       priorityClassName: system-node-critical
       tolerations:
-        - operator: "Exists"
+        - operator: Exists
       containers:
         - name: liveness-probe
           volumeMounts:
@@ -96,11 +106,14 @@ spec:
           lifecycle:
             preStop:
               exec:
-                command: ["/bin/sh", "-c", "lustre_rmmod"]
+                command:
+                  - /bin/sh
+                  - -c
+                  - lustre_rmmod
           args:
-            - "-v=5"
-            - "--endpoint=$(CSI_ENDPOINT)"
-            - "--nodeid=$(KUBE_NODE_NAME)"
+            - -v=5
+            - --endpoint=$(CSI_ENDPOINT)
+            - --nodeid=$(KUBE_NODE_NAME)
           ports:
             - containerPort: 29763
               name: healthz
@@ -139,9 +152,9 @@ spec:
             - name: AZURELUSTRE_CSI_INSTALL_LUSTRE_CLIENT
               value: "yes"
             - name: LUSTRE_VERSION
-              value: "2.15.7"
+              value: 2.15.7
             - name: CLIENT_SHA_SUFFIX
-              value: "33-g79ddf99"
+              value: 33-g79ddf99
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -154,7 +167,7 @@ spec:
               name: socket-dir
             - mountPath: /var/lib/kubelet/
               name: mountpoint-dir
-              mountPropagation: "Bidirectional"
+              mountPropagation: Bidirectional
             - mountPath: /etc/kubernetes/
               name: azure-cred
             - mountPath: /dev
