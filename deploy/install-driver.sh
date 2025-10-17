@@ -111,7 +111,13 @@ else
   fi
 fi
 
+# Clean up legacy objects renamed by the chart restructure so that in-place
+# upgrades don't leave them orphaned:
+#   - the old monolithic node DaemonSet (now per-flavor csi-azurelustre-node-<flavor>)
+#   - the un-prefixed RBAC role/binding (now fullname-prefixed csi-azurelustre-*)
 kubectl delete -n kube-system daemonset csi-azurelustre-node --ignore-not-found
+kubectl delete clusterrolebinding azurelustre-csi-provisioner-binding --ignore-not-found
+kubectl delete clusterrole azurelustre-external-provisioner-role --ignore-not-found
 
 kubectl apply -f "${repo}/rbac-csi-azurelustre-controller.yaml"
 kubectl apply -f "${repo}/rbac-csi-azurelustre-node.yaml"

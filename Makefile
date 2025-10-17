@@ -17,11 +17,12 @@ GIT_COMMIT ?= $(shell git rev-parse HEAD)
 REGISTRY ?= azurelustre.azurecr.io
 IMAGE_NAME = azurelustre-csi
 IMAGE_VERSION ?= latest
-IMAGE_TAG ?= $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_VERSION)
+export REPOSITORY ?= $(REGISTRY)/$(IMAGE_NAME)
 LATEST_TAG ?= latest
-IMAGE_TAG_LATEST = $(REGISTRY)/$(IMAGE_NAME):$(LATEST_TAG)
+IMAGE_TAG ?= $(REPOSITORY):$(IMAGE_VERSION)
+IMAGE_TAG_LATEST = $(REPOSITORY):$(LATEST_TAG)
 COMMIT_TAG ?= $(LATEST_TAG)-$(GIT_COMMIT)
-IMAGE_TAG_COMMIT = $(REGISTRY)/$(IMAGE_NAME):$(COMMIT_TAG)
+IMAGE_TAG_COMMIT = $(REPOSITORY):$(COMMIT_TAG)
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS ?= "-X ${PKG}/pkg/azurelustre.driverVersion=${IMAGE_VERSION} -X ${PKG}/pkg/azurelustre.gitCommit=${GIT_COMMIT} -X ${PKG}/pkg/azurelustre.buildDate=${BUILD_DATE} -s -w -extldflags '-static'"
 GINKGO_FLAGS = -ginkgo.v
@@ -114,6 +115,9 @@ e2e-test:
 		go test -v -timeout=0 ./test/e2e ${GINKGO_FLAGS};\
 	fi
 
+.PHONY: helm-chart-packages
+helm-chart-packages:
+	hack/update-helm-chart-packages.sh
 #
 # Azure Lustre: Code build
 #
@@ -208,6 +212,12 @@ push-commit-%: tag-commit-% FORCE
 .PHONY: print-flavors
 print-flavors:
 	@echo $(FLAVORS)
+
+# Print every flavor regardless of ARCH. The single source of truth for
+# test and release work.
+.PHONY: print-all-flavors
+print-all-flavors:
+	@echo $(ALL_FLAVORS)
 
 #
 # Convenience aggregates
