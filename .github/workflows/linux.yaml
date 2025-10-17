@@ -36,7 +36,6 @@ jobs:
 
       - name: Run unit test
         run: |
-
           export PATH=$PATH:$HOME/.local/bin
           sudo apt-get update
           make verify

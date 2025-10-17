@@ -31,7 +31,7 @@ var (
 	version                      = flag.Bool("version", false, "Print the version and exit.")
 	driverName                   = flag.String("drivername", azurelustre.DefaultDriverName, "name of the driver")
 	enableAzureLustreMockMount   = flag.Bool("enable-azurelustre-mock-mount", false, "Whether enable mock mount(only for testing)")
-	enableAzureLustreMockDynProv = flag.Bool("enable-azurelustre-mock-dyn-prov", true, "Whether enable mock dynamic provisioning(only for testing)")
+	enableAzureLustreMockDynProv = flag.Bool("enable-azurelustre-mock-dyn-prov", false, "Whether enable mock dynamic provisioning(only for testing)")
 	workingMountDir              = flag.String("working-mount-dir", "/tmp", "working directory for provisioner to mount lustre filesystems temporarily")
 	removeNotReadyTaint          = flag.Bool("remove-not-ready-taint", true, "remove NotReady taint from node when node is ready")
 

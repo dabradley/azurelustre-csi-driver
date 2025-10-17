@@ -111,7 +111,16 @@ else
   fi
 fi
 
+# Clean up objects that an in-place upgrade would otherwise leave broken:
+#   - the controller Deployment: its spec.selector gained labels in the chart
+#     restructure, and selectors are immutable, so `kubectl apply` over an
+#     existing controller fails ("field is immutable"). Delete and recreate it.
+#   - the old monolithic node DaemonSet (now per-flavor csi-azurelustre-node-<flavor>)
+#   - the un-prefixed RBAC role/binding (now fullname-prefixed csi-azurelustre-*)
+kubectl delete -n kube-system deployment csi-azurelustre-controller --ignore-not-found
 kubectl delete -n kube-system daemonset csi-azurelustre-node --ignore-not-found
+kubectl delete clusterrolebinding azurelustre-csi-provisioner-binding --ignore-not-found
+kubectl delete clusterrole azurelustre-external-provisioner-role --ignore-not-found
 
 kubectl apply -f "${repo}/rbac-csi-azurelustre-controller.yaml"
 kubectl apply -f "${repo}/rbac-csi-azurelustre-node.yaml"
