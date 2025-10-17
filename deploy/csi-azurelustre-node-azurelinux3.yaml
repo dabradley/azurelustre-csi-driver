@@ -4,6 +4,13 @@ apiVersion: apps/v1
 metadata:
   name: csi-azurelustre-node-azurelinux3
   namespace: kube-system
+  labels:
+    app.kubernetes.io/component: node
+    app.kubernetes.io/name: azurelustre-csi-driver
+    app.kubernetes.io/part-of: azurelustre-csi-driver
+    app.kubernetes.io/version: latest
+    app: csi-azurelustre-node
+    flavor: azurelinux3
 spec:
   updateStrategy:
     rollingUpdate:
@@ -11,12 +18,17 @@ spec:
     type: RollingUpdate
   selector:
     matchLabels:
+      app.kubernetes.io/component: node
       app: csi-azurelustre-node
       flavor: azurelinux3
   template:
     metadata:
       labels:
         app: csi-azurelustre-node
+        app.kubernetes.io/component: node
+        app.kubernetes.io/name: azurelustre-csi-driver
+        app.kubernetes.io/part-of: azurelustre-csi-driver
+        app.kubernetes.io/version: latest
         flavor: azurelinux3
     spec:
       hostNetwork: true
@@ -25,7 +37,6 @@ spec:
       nodeSelector:
         kubernetes.io/os: linux
         kubernetes.io/arch: amd64
-        kubernetes.azure.com/os-sku-effective: AzureLinux3
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -35,6 +46,10 @@ spec:
                     operator: NotIn
                     values:
                       - virtual-kubelet
+                  - key: kubernetes.azure.com/os-sku-effective
+                    operator: In
+                    values:
+                      - AzureLinux3
       priorityClassName: system-node-critical
       tolerations:
         - operator: "Exists"

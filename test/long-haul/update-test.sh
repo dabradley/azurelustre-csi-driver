@@ -63,7 +63,7 @@ function print_versions () {
 	print_logs_info "Control-plane Kubernetes version: ${currentControlPlaneK8sVersion}"
 	print_logs_info "OS kernel version: ${kernelVersion}"
 	print_logs_info "Lustre client module package name: ${modulePkgName}"
-	print_logs_info "Lustre client module package version: ${modulePkgVersion}"	
+	print_logs_info "Lustre client module package version: ${modulePkgVersion}"
 }
 
 print_logs_title "Print versions before"
