@@ -6,19 +6,21 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/component: controller
+    app: csi-azurelustre-controller
     {{- include "azurelustre.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.controller.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/component: controller
+      app: csi-azurelustre-controller
   template:
     metadata:
       labels:
         app.kubernetes.io/component: controller
+        app: csi-azurelustre-controller
         {{- include "azurelustre.labels" . | nindent 8 }}
     spec:
-      hostNetwork: true
       serviceAccountName: {{ include "azurelustre.serviceAccountNameController" . }}
       nodeSelector:
 {{ toYaml .Values.controller.nodeSelector | indent 8 }}
@@ -53,7 +55,7 @@ spec:
           resources:
 {{ toYaml .Values.sidecars.livenessProbe.resources | indent 12 }}
         - name: azurelustre
-          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}-jammy
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
 {{- range $arg := .Values.controller.extraArgs }}
@@ -84,8 +86,6 @@ spec:
               name: socket-dir
             - mountPath: {{ .Values.paths.kubernetes }}/
               name: azure-cred
-            - mountPath: /etc/host-os-release
-              name: host-os-release
           resources:
 {{ toYaml .Values.controller.resources | indent 12 }}
       volumes:
@@ -95,8 +95,4 @@ spec:
           hostPath:
             path: {{ .Values.paths.kubernetes }}/
             type: DirectoryOrCreate
-        - name: host-os-release
-          hostPath:
-            path: {{ .Values.paths.osRelease }}
-            type: File
 {{- end }}

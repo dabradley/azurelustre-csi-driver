@@ -4,39 +4,48 @@ apiVersion: apps/v1
 metadata:
   name: csi-azurelustre-controller
   namespace: kube-system
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/name: azurelustre-csi-driver
+    app.kubernetes.io/part-of: azurelustre-csi-driver
+    app: csi-azurelustre-controller
 spec:
   replicas: 2
   selector:
     matchLabels:
       app: csi-azurelustre-controller
+      app.kubernetes.io/component: controller
   template:
     metadata:
       labels:
         app: csi-azurelustre-controller
+        app.kubernetes.io/component: controller
+        app.kubernetes.io/name: azurelustre-csi-driver
+        app.kubernetes.io/part-of: azurelustre-csi-driver
     spec:
       serviceAccountName: csi-azurelustre-controller-sa
       nodeSelector:
         kubernetes.io/os: linux  # add "kubernetes.io/role: master" to run controller on master node
       priorityClassName: system-cluster-critical
       tolerations:
-        - key: "node-role.kubernetes.io/master"
-          operator: "Exists"
-          effect: "NoSchedule"
-        - key: "node-role.kubernetes.io/controlplane"
-          operator: "Exists"
-          effect: "NoSchedule"
-        - key: "node-role.kubernetes.io/control-plane"
-          operator: "Exists"
-          effect: "NoSchedule"
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/controlplane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: csi-provisioner
           image: mcr.microsoft.com/oss/kubernetes-csi/csi-provisioner:v5.2.0
           args:
-            - "-v=2"
-            - "--csi-address=$(ADDRESS)"
-            - "--leader-election"
-            - "--timeout=15m"
-            - "--extra-create-metadata=true"
+            - -v=2
+            - --leader-election
+            - --timeout=15m
+            - --extra-create-metadata=true
+            - --csi-address=$(ADDRESS)
           env:
             - name: ADDRESS
               value: /csi/csi.sock
@@ -70,9 +79,9 @@ spec:
           image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-jammy
           imagePullPolicy: Always
           args:
-            - "-v=5"
-            - "--endpoint=$(CSI_ENDPOINT)"
-            - "--enable-azurelustre-mock-dyn-prov=false"
+            - -v=5
+            - --enable-azurelustre-mock-dyn-prov=false
+            - --endpoint=$(CSI_ENDPOINT)
           ports:
             - containerPort: 29762
               name: healthz
