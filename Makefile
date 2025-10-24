@@ -19,7 +19,10 @@ TARGET ?= csi
 IMAGE_NAME ?= azurelustre-$(TARGET)
 IMAGE_VERSION ?= latest
 IMAGE_TAG ?= $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_VERSION)
-IMAGE_TAG_LATEST = $(REGISTRY)/$(IMAGE_NAME):latest
+LATEST_TAG ?= latest
+IMAGE_TAG_LATEST = $(REGISTRY)/$(IMAGE_NAME):$(LATEST_TAG)
+COMMIT_TAG ?= $(LATEST_TAG)-$(GIT_COMMIT)
+IMAGE_TAG_COMMIT = $(REGISTRY)/$(IMAGE_NAME):$(COMMIT_TAG)
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS ?= "-X ${PKG}/pkg/azurelustre.driverVersion=${IMAGE_VERSION} -X ${PKG}/pkg/azurelustre.gitCommit=${GIT_COMMIT} -X ${PKG}/pkg/azurelustre.buildDate=${BUILD_DATE} -s -w -extldflags '-static'"
 GINKGO_FLAGS = -ginkgo.v
@@ -118,7 +121,7 @@ azurelustre-container:
 	done
 
 #
-# Azure Lustre: Docker push
+# Azure Lustre: Docker tag & push
 #
 .PHONY: push
 push:
@@ -131,8 +134,8 @@ else
 	docker push $(IMAGE_TAG)-noble
 endif
 
-.PHONY: push-latest
-push-latest:
+.PHONY: tag-latest
+tag-latest:
 ifdef CI
 	docker manifest create --amend $(IMAGE_TAG_LATEST) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
 	docker manifest push --purge $(IMAGE_TAG_LATEST)
@@ -140,8 +143,27 @@ ifdef CI
 else
 	docker tag $(IMAGE_TAG)-jammy $(IMAGE_TAG_LATEST)-jammy
 	docker tag $(IMAGE_TAG)-noble $(IMAGE_TAG_LATEST)-noble
+
+.PHONY: push-latest
+push-latest: tag-latest
 	docker push $(IMAGE_TAG_LATEST)-jammy
 	docker push $(IMAGE_TAG_LATEST)-noble
+endif
+
+.PHONY: tag-commit
+tag-commit: tag-latest
+ifdef CI
+	docker manifest create --amend $(IMAGE_TAG_COMMIT) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
+	docker manifest push --purge $(IMAGE_TAG_COMMIT)
+	docker manifest inspect $(IMAGE_TAG_COMMIT)
+else
+	docker tag $(IMAGE_TAG_LATEST)-jammy $(IMAGE_TAG_COMMIT)-jammy
+	docker tag $(IMAGE_TAG_LATEST)-noble $(IMAGE_TAG_COMMIT)-noble
+
+.PHONY: push-commit
+push-commit: tag-commit
+	docker push $(IMAGE_TAG_COMMIT)-jammy
+	docker push $(IMAGE_TAG_COMMIT)-noble
 endif
 
 .PHONY: build-push
@@ -152,6 +174,9 @@ build-push-quick: quickcontainer push
 
 .PHONY: build-push-latest
 build-push-latest: container push-latest
+
+.PHONY: build-push-latest-commit
+build-push-latest-commit: container push-latest push-commit
 
 .PHONY: build-push-quick-latest
 build-push-quick-latest: quickcontainer push-latest
