@@ -3,7 +3,7 @@
 [![Coverage Status](https://coveralls.io/repos/github/kubernetes-sigs/azurelustre-csi-driver/badge.svg?branch=main)](https://coveralls.io/github/kubernetes-sigs/azurelustre-csi-driver?branch=main)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubernetes-sigs%2Fazurelustre-csi-driver.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubernetes-sigs%2Fazurelustre-csi-driver?ref=badge_shield)
 
-### About
+## About
 
 This driver allows Kubernetes to access Azure Lustre file system.
 
@@ -50,7 +50,7 @@ See the [full release history](https://github.com/kubernetes-sigs/azurelustre-cs
 
 - [Install CSI driver in AKS cluster](./docs/install-csi-driver.md)
 - [Deploy workload with Static Provisioning](./docs/static-provisioning.md)
-- [Deploy workload with Dynamic Provisioning (Public Preview)](./docs/dynamic-provisioning.md)
+- [Deploy workload with Dynamic Provisioning](./docs/dynamic-provisioning.md)
 
 &nbsp;
 
