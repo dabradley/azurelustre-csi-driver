@@ -132,9 +132,10 @@ func (d *DynamicProvisioner) currentClusterState(ctx context.Context, resourceGr
 	}
 
 	if resp.Properties != nil && resp.Properties.ProvisioningState != nil {
-		if *resp.Properties.ProvisioningState == armstoragecache.AmlFilesystemProvisioningStateTypeDeleting {
+		switch *resp.Properties.ProvisioningState { //nolint:exhaustive // We are only trying to react to these states
+		case armstoragecache.AmlFilesystemProvisioningStateTypeDeleting:
 			return ClusterStateDeleting, nil
-		} else if *resp.Properties.ProvisioningState == armstoragecache.AmlFilesystemProvisioningStateTypeFailed {
+		case armstoragecache.AmlFilesystemProvisioningStateTypeFailed:
 			return ClusterStateFailed, nil
 		}
 	}
@@ -426,7 +427,7 @@ func (d *DynamicProvisioner) getAmlfsSubnetSize(ctx context.Context, sku string,
 		return 0, convertHTTPResponseErrorToGrpcCodeError(err)
 	}
 
-	return int(*reqSize.RequiredAmlFilesystemSubnetsSize.FilesystemSubnetSize), nil
+	return int(*reqSize.FilesystemSubnetSize), nil
 }
 
 func (d *DynamicProvisioner) checkSubnetAddresses(ctx context.Context, vnetResourceGroup, vnetName, subnetID string) (int, error) {

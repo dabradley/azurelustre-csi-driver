@@ -72,7 +72,11 @@ func TestIntegration(t *testing.T) {
 	assert.True(t, strings.HasSuffix(cwd, "azurelustre-csi-driver"))
 
 	// Pass in resource group name, storage account name and cloud type
-	cmd := exec.Command("./test/integration/run-tests-all-clouds.sh", creds.ResourceGroup, creds.Cloud) // #nosec G204
+	// Validate and sanitize inputs to avoid command injection
+	if strings.ContainsAny(creds.ResourceGroup, ";&|$<>`\\") || strings.ContainsAny(creds.Cloud, ";&|$<>`\\") {
+		t.Fatalf("Invalid characters detected in resource group or cloud name")
+	}
+	cmd := exec.CommandContext(ctx, "./test/integration/run-tests-all-clouds.sh", creds.ResourceGroup, creds.Cloud) // #nosec G204 // Non-prod test script
 	cmd.Dir = cwd
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

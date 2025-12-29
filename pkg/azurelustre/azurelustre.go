@@ -210,7 +210,10 @@ func NewDriver(options *DriverOptions) *Driver {
 		if clientID := os.Getenv("AZURE_CLIENT_ID"); clientID != "" {
 			config.AADClientID = clientID
 		} else if config.UseManagedIdentityExtension && config.UserAssignedIdentityID != "" {
-			os.Setenv("AZURE_CLIENT_ID", config.UserAssignedIdentityID)
+			err = os.Setenv("AZURE_CLIENT_ID", config.UserAssignedIdentityID)
+			if err != nil {
+				klog.Warningf("failed to set AZURE_CLIENT_ID env var: %v", err)
+			}
 			config.AADClientID = config.UserAssignedIdentityID
 		}
 		if err = az.InitializeCloudFromConfig(ctx, config, false, false); err != nil {

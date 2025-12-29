@@ -137,7 +137,7 @@ func DeleteAzureCredentialFile() error {
 // getCredentialsFromAzureCredentials parses the azure credentials toml (AZURE_CREDENTIALS)
 // in Prow and returns the credential information usable to Azure Lustre CSI driver
 func getCredentialsFromAzureCredentials(azureCredentialsPath string) (*FromProw, error) {
-	content, err := os.ReadFile(azureCredentialsPath)
+	content, err := os.ReadFile(azureCredentialsPath) // #nosec G304 // Using env var for test, not production concern
 	log.Printf("Reading credentials file %v", azureCredentialsPath)
 	if err != nil {
 		return nil, fmt.Errorf("error reading credentials file %v %w", azureCredentialsPath, err)
@@ -163,7 +163,11 @@ func parseAndExecuteTemplate(cloud, tenantID, subscriptionID, aadClientID, aadCl
 	if err != nil {
 		return nil, fmt.Errorf("error creating %s %w", TempAzureCredentialFilePath, err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("error closing file %s %v", TempAzureCredentialFilePath, err)
+		}
+	}()
 
 	c := Credentials{
 		cloud,

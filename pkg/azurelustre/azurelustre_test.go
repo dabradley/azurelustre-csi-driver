@@ -239,7 +239,11 @@ func TestIsCorruptedDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create tmp dir: %v", err)
 	}
-	defer os.RemoveAll(existingMountPath)
+	defer func() {
+		if err := os.RemoveAll(existingMountPath); err != nil {
+			t.Fatalf("failed to remove tmp dir: %v", err)
+		}
+	}()
 
 	tests := []struct {
 		desc           string
