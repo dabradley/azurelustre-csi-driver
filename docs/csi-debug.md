@@ -2,6 +2,157 @@
 
 ---
 
+## Driver Readiness and Health Issues
+
+### Enhanced LNet Validation Troubleshooting
+
+**Symptoms:**
+
+- CSI driver node pods show `2/3` ready status
+- Readiness probe failing repeatedly
+- Pods remain in `Running` or startup issues
+- Mount operations fail with "driver not ready" errors
+
+#### Detailed Probe Verification Steps
+
+If the exec-based readiness probe fails (exit code 1), use these detailed verification steps:
+
+```shell
+# Verify detailed probe configuration
+kubectl describe -n kube-system pod -l app=csi-azurelustre-node
+```
+Look for exec-based probe configuration in the pod description:
+- `Readiness: exec [/app/readinessProbe.sh]`
+- `Startup: exec [/app/readinessProbe.sh]`
+
+In the Events section, you may see initial startup probe failures during LNet initialization:
+- `Warning Unhealthy ... Startup probe failed: Node pod detected - performing Lustre-specific readiness checks`
+
+This is normal during the initialization phase. Once LNet is fully operational, the probes will succeed.
+
+```shell
+# Test the readiness probe script directly
+kubectl exec -n kube-system <pod-name> -c azurelustre -- /app/readinessProbe.sh
+```
+Expected output when working correctly:
+- `"Node pod detected - performing Lustre-specific readiness checks"`
+- `"All Lustre readiness checks passed"`
+
+```shell
+# Check for enhanced validation messages
+kubectl logs -n kube-system -l app=csi-azurelustre-node -c azurelustre --tail=20
+```
+Look for CSI driver startup and readiness messages:
+- `"vendor_version":"v0.4.0-readiness-http"` - Confirms feature branch deployment
+- Standard CSI GRPC operation logs indicating successful driver initialization
+
+```shell
+# Check for detailed validation failure reasons
+kubectl logs -n kube-system <pod-name> -c azurelustre | grep -E "(LNet validation failed|Failed to|not operational)"
+```
+
+Common issues and solutions:
+- **"No valid NIDs"**: LNet networking not properly configured
+- **"Self-ping test failed"**: Network connectivity issues
+- **"Interfaces not operational"**: Network interfaces not in UP state
+- **"Lustre module not loaded"**: Kernel module loading issues
+
+**Test readiness probe directly:**
+
+```sh
+# Test the exec-based readiness probe script
+kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- /app/readinessProbe.sh
+```
+
+Expected responses:
+- Exit code 0: Enhanced LNet validation passed
+- Exit code 1: One or more validation checks failed (with descriptive error message)
+
+**Test HTTP health endpoints (optional manual testing):**
+
+```sh
+# Test enhanced readiness/liveness via HTTP endpoint
+kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- curl -s localhost:29763/healthz
+```
+
+HTTP responses:
+- `/healthz`: `ok` (HTTP 200) or `not ready` (HTTP 503)
+
+**Check enhanced validation logs:**
+
+```sh
+# Look for detailed LNet validation messages
+kubectl logs -n kube-system <csi-azurelustre-node-pod> -c azurelustre | grep -E "(LNet validation|NIDs|self-ping|interfaces)"
+```
+
+Look for validation success messages:
+- `"LNet validation passed: all checks successful"`
+- `"Found NIDs: <network-identifiers>"`
+- `"LNet self-ping to <nid> successful"`
+- `"All LNet interfaces operational"`
+
+**Common readiness failure patterns:**
+
+1. **No valid NIDs found:**
+   ```text
+   LNet validation failed: no valid NIDs
+   No valid non-loopback LNet NIDs found
+   ```
+   **Solution:** Check LNet configuration and network setup
+
+2. **Self-ping test failed:**
+   ```text
+   LNet validation failed: self-ping test failed
+   LNet self-ping to <nid> failed
+   ```
+   **Solution:** Verify network connectivity and LNet networking
+
+3. **Interfaces not operational:**
+   ```text
+   LNet validation failed: interfaces not operational
+   Found non-operational interface: status: down
+   ```
+   **Solution:** Check network interface status and configuration
+
+4. **Module loading issues:**
+   ```text
+   Lustre module not loaded
+   LNet kernel module is not loaded
+   ```
+   **Solution:** Check kernel module installation and loading
+
+**Debug LNet configuration manually:**
+
+```sh
+# Check kernel modules
+kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lsmod | grep -E "(lnet|lustre)"
+
+# Check LNet NIDs
+kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lctl list_nids
+
+# Test LNet self-ping
+kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lctl ping <nid>
+
+# Check interface status
+kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lnetctl net show --net tcp
+```
+
+**Check probe configuration:**
+
+```sh
+# Verify probe settings in deployment
+kubectl describe -n kube-system pod <csi-azurelustre-node-pod> | grep -A 10 -E "(Liveness|Readiness|Startup)"
+```
+
+**Monitor readiness probe attempts:**
+
+```sh
+# Watch probe events in real-time
+kubectl get events --field-selector involvedObject.name=<csi-azurelustre-node-pod> -n kube-system -w | grep -E "(Readiness|Liveness)"
+```
+
+---
+
 ## Volume Provisioning Issues
 
 ### Dynamic Provisioning (AMLFS Cluster Creation)
@@ -292,6 +443,75 @@ kubectl exec -it csi-azurelustre-node-9ds7f -n kube-system -c azurelustre -- mou
 > **Note:** It is expected for each mount mount to be listed twice
 
 Check for solutions in [Resolving Common Errors](errors.md)
+
+---
+
+## Pod Scheduling and Node Readiness Issues
+
+### Pods Stuck in Pending Status with Taint-Related Errors
+
+**Symptoms:**
+
+- Pods requiring Azure Lustre storage remain in `Pending` status
+- Pod events show taint-related scheduling failures
+- Error messages mentioning `azurelustre.csi.azure.com/agent-not-ready` taint
+
+**Check pod scheduling status:**
+
+```sh
+kubectl describe pod <pod-name>
+```
+
+Look for events such as:
+
+- `Warning  FailedScheduling  ... node(s) had taint {azurelustre.csi.azure.com/agent-not-ready: }, that the pod didn't tolerate`
+- `0/X nodes are available: X node(s) had taint {azurelustre.csi.azure.com/agent-not-ready}`
+
+**Check node taints:**
+
+```sh
+kubectl describe nodes | grep -A5 -B5 "azurelustre.csi.azure.com/agent-not-ready"
+```
+
+**Check CSI driver readiness on nodes:**
+
+```sh
+# Check if CSI driver pods are running on all nodes
+kubectl get pods -n kube-system -l app=csi-azurelustre-node -o wide
+
+# Check CSI driver logs for startup issues
+kubectl logs -n kube-system -l app=csi-azurelustre-node -c azurelustre --tail=100 | grep -i "taint\|ready\|error"
+```
+
+**Common causes and solutions:**
+
+1. **CSI Driver Still Starting**: Wait for CSI driver pods to reach `Running` status
+
+   ```sh
+   kubectl wait --for=condition=ready pod -l app=csi-azurelustre-node -n kube-system --timeout=300s
+   ```
+
+2. **Lustre Module Loading Issues**: Check if Lustre kernel modules are properly loaded
+
+   ```sh
+   kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lsmod | grep lustre
+   ```
+
+3. **Manual Taint Removal** (Emergency only - not recommended for production):
+
+   ```sh
+   kubectl taint nodes <node-name> azurelustre.csi.azure.com/agent-not-ready:NoSchedule-
+   ```
+
+**Verify taint removal functionality:**
+
+Check that startup taint removal is enabled in the CSI driver:
+
+```sh
+kubectl logs -n kube-system -l app=csi-azurelustre-node -c azurelustre | grep -i "remove.*taint"
+```
+
+Expected log output should show taint removal activity when the driver becomes ready.
 
 ---
 
