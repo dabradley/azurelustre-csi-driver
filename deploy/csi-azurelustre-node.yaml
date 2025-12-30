@@ -84,8 +84,8 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: azurelustre
-          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.3.0
-          imagePullPolicy: IfNotPresent
+          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.3.1
+          imagePullPolicy: Always
           lifecycle:
             preStop:
               exec:
@@ -110,15 +110,31 @@ spec:
             initialDelaySeconds: 60
             timeoutSeconds: 10
             periodSeconds: 30
+          readinessProbe:
+            failureThreshold: 5
+            exec:
+              command:
+                - /app/readinessProbe.sh
+            initialDelaySeconds: 10
+            timeoutSeconds: 10
+            periodSeconds: 30
+          startupProbe:
+            failureThreshold: 120
+            exec:
+              command:
+                - /app/readinessProbe.sh
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 5
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
             - name: AZURELUSTRE_CSI_INSTALL_LUSTRE_CLIENT
               value: "yes"
             - name: LUSTRE_VERSION
-              value: "2.15.5"
+              value: "2.15.7"
             - name: CLIENT_SHA_SUFFIX
-              value: "41-gc010524"
+              value: "33-g79ddf99"
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
