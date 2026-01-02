@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/azurelustre-csi-driver/pkg/util"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader"
 	azure "sigs.k8s.io/cloud-provider-azure/pkg/provider"
+	azureconfig "sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
 )
 
 const (
@@ -190,7 +191,7 @@ func NewDriver(options *DriverOptions) *Driver {
 		klog.V(2).Infof("use default %s env var: %v", DefaultAzureConfigFileEnv, credFile)
 	}
 
-	config, err := configloader.Load[azure.Config](ctx, nil, &configloader.FileLoaderConfig{
+	config, err := configloader.Load[azureconfig.Config](ctx, nil, &configloader.FileLoaderConfig{
 		FilePath: credFile,
 	})
 	if err != nil {
