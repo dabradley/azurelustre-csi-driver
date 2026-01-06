@@ -6,7 +6,7 @@ This directory contains distribution-specific DaemonSet deployments for the Azur
 
 ## Files
 
-- `csi-azurelustre-node-jammy.yaml` - Ubuntu 22.04 (Jammy) nodes  
+- `csi-azurelustre-node-jammy.yaml` - Ubuntu 22.04 (Jammy) nodes
 - `csi-azurelustre-node-noble.yaml` - Ubuntu 24.04 (Noble) nodes
 
 ## Distribution Targeting
@@ -59,6 +59,6 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,OS-SKU:.metadata.labels.
 To check DaemonSet pod distribution:
 
 ```bash
-kubectl get pods -n kube-system -l app=csi-azurelustre-node -l flavor=jammy -o wide  
+kubectl get pods -n kube-system -l app=csi-azurelustre-node -l flavor=jammy -o wide
 kubectl get pods -n kube-system -l app=csi-azurelustre-node -l flavor=noble -o wide
 ```

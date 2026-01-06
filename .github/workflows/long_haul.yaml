@@ -12,11 +12,11 @@ name: Long-Haul Test
 jobs:
   Run-long-haul-on-AKS:
     name: Run long-haul on AKS
-    runs-on: ubuntu-latest    
+    runs-on: ubuntu-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-        
+
       - name: Azure Login
         uses: Azure/login@v1.1
         with:

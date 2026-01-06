@@ -26,7 +26,7 @@ clientPerNodeArray=(64 128)
 for config in $iorConfigArray
 do
     for clientPerNode in ${clientPerNodeArray[@]}
-    do 
+    do
         fileName=${config}_${clientPerNode}
         echo $fileName
 
@@ -43,5 +43,5 @@ do
 
             echo -e  $write ' \t ' $read
         done
-    done    
+    done
 done

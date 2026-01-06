@@ -334,7 +334,7 @@ class PerfScaleTest:
             os.remove(self._generated_workload_yaml)
         if os.path.exists(self._csi_log_path):
             logger.info("deleting log folder")
-            shutil.rmtree(self._csi_log_path)            
+            shutil.rmtree(self._csi_log_path)
 
     def check_results(self):
         logger.info("checking result")

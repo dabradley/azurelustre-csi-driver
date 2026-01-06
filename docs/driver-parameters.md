@@ -24,7 +24,7 @@ When enabled (default), the Azure Lustre CSI driver will:
 This mechanism prevents pods requiring Azure Lustre storage from being scheduled to nodes where:
 
 - Lustre kernel modules are not yet loaded
-- CSI driver components are not fully initialized 
+- CSI driver components are not fully initialized
 - Network connectivity to Lustre filesystems is not established
 
 ## Dynamic Provisioning (Create an AMLFS Cluster through AKS)

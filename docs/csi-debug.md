@@ -236,7 +236,7 @@ kubectl get events -n kube-system --field-selector involvedObject.kind=DaemonSet
    ```sh
    # Edit the DaemonSet to adjust node selectors
    kubectl edit ds -n kube-system csi-azurelustre-node-jammy
-   
+
    # Or modify the affinity matchExpressions to include your node's label value
    # For example, add additional values to the kubernetes.azure.com/os-sku-effective operator
    ```
@@ -266,7 +266,7 @@ kubectl get events -n kube-system --field-selector involvedObject.kind=DaemonSet
    ```sh
    # Uninstall the previous driver version
    ./deploy/uninstall-driver.sh
-   
+
    # Then install the new version with OS-specific DaemonSets
    ./deploy/install-driver.sh
    ```
@@ -344,7 +344,7 @@ kubectl describe pod -n kube-system <duplicate-pod-name> | grep -A10 "Node-Selec
    ```sh
    # Remove incorrect label
    kubectl label node <node-name> kubernetes.azure.com/os-sku-effective-
-   
+
    # Add correct label
    kubectl label node <node-name> kubernetes.azure.com/os-sku-effective=Ubuntu2204
    ```
@@ -356,7 +356,7 @@ kubectl describe pod -n kube-system <duplicate-pod-name> | grep -A10 "Node-Selec
    ```sh
    # Uninstall the previous driver version
    ./deploy/uninstall-driver.sh
-   
+
    # Then install the new version with OS-specific DaemonSets
    ./deploy/install-driver.sh
    ```
@@ -518,7 +518,7 @@ kubectl get pods -n kube-system -l app=csi-azurelustre-node -o custom-columns=NA
    ```sh
    # Uninstall the previous driver version
    ./deploy/uninstall-driver.sh
-   
+
    # Then install the new version with OS-specific DaemonSets
    ./deploy/install-driver.sh
    ```
@@ -604,7 +604,7 @@ kubectl logs -n kube-system -l component=kube-controller-manager | grep -i daemo
    ```sh
    # Verify DaemonSets are active
    kubectl get ds -n kube-system -l app=csi-azurelustre-node
-   
+
    # If DaemonSet is missing or corrupted, redeploy
    kubectl apply -f deploy/csi-azurelustre-node-jammy.yaml
    kubectl apply -f deploy/csi-azurelustre-node-noble.yaml

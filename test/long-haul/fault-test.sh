@@ -47,7 +47,7 @@ workloadNodeName=$workloadNodeNameNew
 
 
 print_logs_title "Add label for worker nodes"
-kubectl get nodes --no-headers | awk '{print $1}' | 
+kubectl get nodes --no-headers | awk '{print $1}' |
 {
     while read n;
     do
