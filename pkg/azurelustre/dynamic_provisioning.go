@@ -426,7 +426,10 @@ func (d *DynamicProvisioner) getAmlfsSubnetSize(ctx context.Context, sku string,
 		klog.Errorf("failed to get required AMLFS subnet size for SKU: %s, cluster size: %f, error: %v", sku, clusterSize, err)
 		return 0, convertHTTPResponseErrorToGrpcCodeError(err)
 	}
-
+	if reqSize.FilesystemSubnetSize == nil {
+		klog.Errorf("received nil FilesystemSubnetSize from GetRequiredAmlFSSubnetsSize for SKU: %s, cluster size: %f", sku, clusterSize)
+		return 0, status.Error(codes.Internal, "received nil FilesystemSubnetSize from storage management client")
+	}
 	return int(*reqSize.FilesystemSubnetSize), nil
 }
 
