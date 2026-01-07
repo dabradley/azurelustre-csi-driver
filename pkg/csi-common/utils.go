@@ -41,12 +41,6 @@ func NewVolumeCapabilityAccessMode(mode csi.VolumeCapability_AccessMode_Mode) *c
 	return &csi.VolumeCapability_AccessMode{Mode: mode}
 }
 
-func NewDefaultNodeServer(d *CSIDriver) *DefaultNodeServer {
-	return &DefaultNodeServer{
-		Driver: d,
-	}
-}
-
 func NewDefaultIdentityServer(d *CSIDriver) *DefaultIdentityServer {
 	return &DefaultIdentityServer{
 		Driver: d,
