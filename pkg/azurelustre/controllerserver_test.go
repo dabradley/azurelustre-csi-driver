@@ -1582,12 +1582,3 @@ func TestControllerGetVolume(t *testing.T) {
 	require.ErrorContains(t, err, "not implemented")
 	assert.Equal(t, codes.Unimplemented, status.Code(err))
 }
-
-func TestControllerUnimplementedMethods(t *testing.T) {
-	d := NewFakeDriver()
-	req := csi.ControllerGetVolumeRequest{}
-	resp, err := d.ControllerGetVolume(context.Background(), &req)
-	assert.Nil(t, resp)
-	require.ErrorContains(t, err, "not implemented")
-	assert.Equal(t, codes.Unimplemented, status.Code(err))
-}
