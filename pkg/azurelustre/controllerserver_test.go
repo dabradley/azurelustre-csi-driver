@@ -1501,3 +1501,93 @@ func TestRoundToAmlfsBlockSizeForSku(t *testing.T) {
 		})
 	}
 }
+
+func TestControllerPublishVolume(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ControllerPublishVolumeRequest{}
+	resp, err := d.ControllerPublishVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorContains(t, err, "not implemented")
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestControllerUnpublishVolume(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ControllerUnpublishVolumeRequest{}
+	resp, err := d.ControllerUnpublishVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorContains(t, err, "not implemented")
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestGetCapacity(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.GetCapacityRequest{}
+	resp, err := d.GetCapacity(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorContains(t, err, "not implemented")
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestListVolumes(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ListVolumesRequest{}
+	resp, err := d.ListVolumes(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorContains(t, err, "not implemented")
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestCreateSnapshot(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.CreateSnapshotRequest{}
+	resp, err := d.CreateSnapshot(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorContains(t, err, "not implemented")
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestDeleteSnapshot(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.DeleteSnapshotRequest{}
+	resp, err := d.DeleteSnapshot(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorContains(t, err, "not implemented")
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestListSnapshots(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ListSnapshotsRequest{}
+	resp, err := d.ListSnapshots(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorContains(t, err, "not implemented")
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestControllerExpandVolume(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ControllerExpandVolumeRequest{}
+	resp, err := d.ControllerExpandVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorContains(t, err, "not implemented")
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestControllerGetVolume(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ControllerGetVolumeRequest{}
+	resp, err := d.ControllerGetVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorContains(t, err, "not implemented")
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestControllerUnimplementedMethods(t *testing.T) {
+	d := NewFakeDriver()
+	req := csi.ControllerGetVolumeRequest{}
+	resp, err := d.ControllerGetVolume(context.Background(), &req)
+	assert.Nil(t, resp)
+	require.ErrorContains(t, err, "not implemented")
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
