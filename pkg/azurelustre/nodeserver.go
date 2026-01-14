@@ -581,7 +581,7 @@ func (d *Driver) createSubDir(vol *lustreVolume, mountPath, subDirPath string, m
 
 	klog.V(2).Infof("Making subdirectory at %q", internalVolumePath)
 
-	if err := os.MkdirAll(internalVolumePath, 0o775); err != nil {
+	if err := volumehelper.MakeDir(internalVolumePath); err != nil {
 		return status.Errorf(codes.Internal, "failed to make subdirectory: %v", err.Error())
 	}
 

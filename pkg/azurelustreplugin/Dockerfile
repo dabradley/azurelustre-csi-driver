@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM ubuntu:22.04
+ARG srcImage=ubuntu:22.04
+FROM ${srcImage}
 
 COPY "./_output/azurelustreplugin" "/app/azurelustreplugin"
 COPY "./pkg/azurelustreplugin/entrypoint.sh" "/app/entrypoint.sh"
@@ -22,13 +23,8 @@ RUN chmod +x "/app/entrypoint.sh" && chmod +x "/app/readinessProbe.sh"
 
 RUN apt-get update && \
   apt-get upgrade -y && \
-  apt-get install -y \
-   gpg curl ca-certificates iproute2 kmod libc-dev-bin libc6 libc6-dev  \
-   libcrypt-dev libgdbm-compat4 libgdbm6 libkmod2     \
-   libmysqlclient21 libnetsnmptrapd40 libnl-3-200 libnl-genl-3-200 libnsl-dev libpci-dev libpci3    \
-   libperl5.34 libsensors-config libsensors-dev libsensors5 libsnmp-base libsnmp-dev libsnmp40      \
-   libssl-dev libtirpc-dev libudev-dev libwrap0 libwrap0-dev libyaml-0-2 linux-base linux-base-sgx  \
-   linux-libc-dev mysql-common pci.ids perl perl-modules-5.34 rpcsvc-proto zlib1g-dev -y && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    gpg curl ca-certificates iproute2 kmod && \
   apt-get autoremove -y && \
   apt-get clean -y && \
   rm -rf \
