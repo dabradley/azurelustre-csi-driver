@@ -33,6 +33,7 @@ var (
 	enableAzureLustreMockMount   = flag.Bool("enable-azurelustre-mock-mount", false, "Whether enable mock mount(only for testing)")
 	enableAzureLustreMockDynProv = flag.Bool("enable-azurelustre-mock-dyn-prov", true, "Whether enable mock dynamic provisioning(only for testing)")
 	workingMountDir              = flag.String("working-mount-dir", "/tmp", "working directory for provisioner to mount lustre filesystems temporarily")
+	removeNotReadyTaint          = flag.Bool("remove-not-ready-taint", true, "remove NotReady taint from node when node is ready")
 )
 
 func main() {
@@ -48,7 +49,10 @@ func main() {
 			klog.Fatalln(err)
 		}
 		klog.V(2).Info(info)
-		fmt.Println(info) //nolint:forbidigo // Print version info to stdout for access through kubectl exec
+		_, err = fmt.Println(info) //nolint:forbidigo // Print version info to stdout for access through kubectl exec
+		if err != nil {
+			klog.Fatalln(err)
+		}
 		os.Exit(0)
 	}
 
@@ -63,6 +67,7 @@ func handle() {
 		EnableAzureLustreMockMount:   *enableAzureLustreMockMount,
 		EnableAzureLustreMockDynProv: *enableAzureLustreMockDynProv,
 		WorkingMountDir:              *workingMountDir,
+		RemoveNotReadyTaint:          *removeNotReadyTaint,
 	}
 	driver := azurelustre.NewDriver(&driverOptions)
 	if driver == nil {

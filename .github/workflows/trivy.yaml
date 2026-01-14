@@ -18,9 +18,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
+          check-latest: true
 
       - name: Build an image from Dockerfile
         run: |
@@ -33,7 +34,17 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'test/azurelustre-csi:latest'
+          image-ref: 'test/azurelustre-csi:latest-jammy'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'test/azurelustre-csi:latest-noble'
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true

@@ -20,15 +20,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 	azure "sigs.k8s.io/cloud-provider-azure/pkg/provider"
 )
 
@@ -42,7 +52,7 @@ var DefaultLocationSkuValues = map[string]*LustreSkuValue{
 const (
 	fakeNodeID                = "fakeNodeID"
 	fakeDriverName            = "fake"
-	vendorVersion             = "0.3.0"
+	vendorVersion             = "0.3.1"
 	clusterRequestFailureName = "testShouldFail"
 	driverDefaultLocation     = "defaultFakeLocation"
 	emptyZonesLocation        = "emptyZonesLocation"
@@ -51,12 +61,11 @@ const (
 func NewFakeDriver() *Driver {
 	driverOptions := DriverOptions{
 		NodeID:                       fakeNodeID,
-		DriverName:                   DefaultDriverName,
+		DriverName:                   fakeDriverName,
 		EnableAzureLustreMockMount:   false,
 		EnableAzureLustreMockDynProv: true,
 	}
 	driver := NewDriver(&driverOptions)
-	driver.Name = fakeDriverName
 	driver.Version = vendorVersion
 	driver.cloud = &azure.Cloud{}
 	driver.cloud.SubscriptionID = "defaultFakeSubID"
@@ -125,14 +134,107 @@ func (f *FakeDynamicProvisioner) GetSkuValuesForLocation(_ context.Context, loca
 }
 
 func TestNewDriver(t *testing.T) {
+	fakeConfigFile := "fake-cred-file.json"
+	fakeConfigContent := `{
+    "tenantId": "fake-tenant-id",
+    "subscriptionId": "fake-subscription-id",
+    "aadClientId": "fake-client-id",
+    "aadClientSecret": "fake-client-secret",
+    "resourceGroup": "fake-resource-group",
+    "location": "fake-location",
+}`
+
+	if err := os.WriteFile(fakeConfigFile, []byte(fakeConfigContent), 0o600); err != nil {
+		t.Error(err)
+	}
+
+	defer func() {
+		if err := os.Remove(fakeConfigFile); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	t.Setenv(DefaultAzureConfigFileEnv, fakeConfigFile)
+
 	driverOptions := DriverOptions{
 		NodeID:                       fakeNodeID,
-		DriverName:                   DefaultDriverName,
+		DriverName:                   fakeDriverName,
 		EnableAzureLustreMockMount:   false,
 		EnableAzureLustreMockDynProv: true,
+		WorkingMountDir:              "/tmp",
+		RemoveNotReadyTaint:          true,
 	}
 	d := NewDriver(&driverOptions)
 	assert.NotNil(t, d)
+	assert.NotNil(t, d.cloud)
+	assert.NotNil(t, d.dynamicProvisioner)
+	assert.Equal(t, "fake-resource-group", d.resourceGroup)
+	assert.Equal(t, "fake-location", d.location)
+	assert.Equal(t, fakeNodeID, d.NodeID)
+	assert.Equal(t, fakeDriverName, d.Name)
+	assert.Equal(t, "fake-subscription-id", d.cloud.SubscriptionID)
+	assert.Equal(t, "fake-tenant-id", d.cloud.TenantID)
+	assert.Equal(t, "fake-client-id", d.cloud.AADClientID)
+	assert.Equal(t, "fake-client-secret", d.cloud.AADClientSecret)
+	assert.Equal(t, "fake-location", d.cloud.Location)
+	assert.Equal(t, "fake-resource-group", d.cloud.ResourceGroup)
+	assert.Equal(t, "/tmp", d.workingMountDir)
+	assert.True(t, d.enableAzureLustreMockDynProv, "enableAzureLustreMockDynProv should be true")
+	assert.False(t, d.enableAzureLustreMockMount, "enableAzureLustreMockMount should be false")
+	assert.True(t, d.removeNotReadyTaint, "removeNotReadyTaint should be true")
+}
+
+func TestNewDriverInvalidConfigFileLocation(t *testing.T) {
+	fakeConfigFile := "fake-cred-file.json"
+
+	if err := os.Remove(fakeConfigFile); err != nil && !os.IsNotExist(err) {
+		t.Error(err)
+	}
+
+	t.Setenv(DefaultAzureConfigFileEnv, fakeConfigFile)
+
+	driverOptions := DriverOptions{
+		NodeID:                       fakeNodeID,
+		DriverName:                   fakeDriverName,
+		EnableAzureLustreMockMount:   false,
+		EnableAzureLustreMockDynProv: true,
+		WorkingMountDir:              "/tmp",
+		RemoveNotReadyTaint:          true,
+	}
+	d := NewDriver(&driverOptions)
+	assert.NotNil(t, d)
+	assert.Equal(t, &azure.Cloud{}, d.cloud)
+	assert.Equal(t, &DynamicProvisioner{}, d.dynamicProvisioner)
+}
+
+func TestNewDriverInvalidConfigFileContents(t *testing.T) {
+	invalidConfigFile := "fake-cred-file.json"
+	invalidConfigContent := `;;;....invalid########`
+
+	if err := os.WriteFile(invalidConfigFile, []byte(invalidConfigContent), 0o600); err != nil {
+		t.Error(err)
+	}
+
+	defer func() {
+		if err := os.Remove(invalidConfigFile); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	t.Setenv(DefaultAzureConfigFileEnv, invalidConfigFile)
+
+	driverOptions := DriverOptions{
+		NodeID:                       fakeNodeID,
+		DriverName:                   fakeDriverName,
+		EnableAzureLustreMockMount:   false,
+		EnableAzureLustreMockDynProv: true,
+		WorkingMountDir:              "/tmp",
+		RemoveNotReadyTaint:          true,
+	}
+	d := NewDriver(&driverOptions)
+	assert.NotNil(t, d)
+	assert.Equal(t, &azure.Cloud{}, d.cloud)
+	assert.Equal(t, &DynamicProvisioner{}, d.dynamicProvisioner)
 }
 
 func TestIsCorruptedDir(t *testing.T) {
@@ -140,7 +242,11 @@ func TestIsCorruptedDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create tmp dir: %v", err)
 	}
-	defer os.RemoveAll(existingMountPath)
+	defer func() {
+		if err := os.RemoveAll(existingMountPath); err != nil {
+			t.Fatalf("failed to remove tmp dir: %v", err)
+		}
+	}()
 
 	tests := []struct {
 		desc           string
@@ -411,5 +517,215 @@ func TestPopulateSubnetPropertiesFromCloudConfig(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.testFunc)
+	}
+}
+
+func TestRemoveNotReadyTaintIfNeeded(t *testing.T) {
+	expectedNotReadyTaint := fakeDriverName + AgentNotReadyNodeTaintKeySuffix
+	testCases := []struct {
+		name           string
+		nodeName       string
+		nodeExists     bool
+		featureEnabled bool
+		expectedPatch  bool
+		initialTaints  []corev1.Taint
+		expectedError  bool
+		expectedTaints []string
+	}{
+		{
+			name:           "Won't remove taint if feature is disabled",
+			nodeName:       "test-node",
+			nodeExists:     true,
+			featureEnabled: false,
+			expectedPatch:  false,
+			initialTaints: []corev1.Taint{
+				{
+					Key:    expectedNotReadyTaint,
+					Value:  "NotReady",
+					Effect: corev1.TaintEffectNoSchedule,
+				},
+			},
+			expectedError:  false,
+			expectedTaints: []string{expectedNotReadyTaint},
+		},
+		{
+			name:           "Other taints are ignored",
+			nodeName:       "test-node",
+			nodeExists:     true,
+			featureEnabled: true,
+			expectedPatch:  false,
+			initialTaints: []corev1.Taint{
+				{
+					Key:    "other-taint",
+					Value:  "value",
+					Effect: corev1.TaintEffectNoSchedule,
+				},
+			},
+			expectedError:  false,
+			expectedTaints: []string{"other-taint"},
+		},
+		{
+			name:           "Removes agent-not-ready taint",
+			nodeName:       "test-node",
+			nodeExists:     true,
+			featureEnabled: true,
+			expectedPatch:  true,
+			initialTaints: []corev1.Taint{
+				{
+					Key:    expectedNotReadyTaint,
+					Value:  "NotReady",
+					Effect: corev1.TaintEffectNoSchedule,
+				},
+			},
+			expectedError:  false,
+			expectedTaints: []string{},
+		},
+		{
+			name:           "Leaves other taints when removing agent-not-ready taint",
+			nodeName:       "test-node",
+			nodeExists:     true,
+			featureEnabled: true,
+			expectedPatch:  true,
+			initialTaints: []corev1.Taint{
+				{
+					Key:    expectedNotReadyTaint,
+					Value:  "NotReady",
+					Effect: corev1.TaintEffectNoSchedule,
+				},
+				{
+					Key:    "other-taint",
+					Value:  "value",
+					Effect: corev1.TaintEffectNoSchedule,
+				},
+			},
+			expectedError:  false,
+			expectedTaints: []string{"other-taint"},
+		},
+		{
+			name:           "Handles node with no taints",
+			nodeName:       "test-node",
+			nodeExists:     true,
+			featureEnabled: true,
+			expectedPatch:  false,
+			initialTaints:  []corev1.Taint{},
+			expectedError:  false,
+			expectedTaints: []string{},
+		},
+		{
+			name:           "Handles node that doesn't exist",
+			nodeName:       "nonexistent-node",
+			nodeExists:     false,
+			featureEnabled: true,
+			expectedPatch:  false,
+			initialTaints:  []corev1.Taint{},
+			expectedError:  true,
+			expectedTaints: []string{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx := context.Background()
+
+				// Create fake kubernetes client
+				fakeClient := kubefake.NewSimpleClientset()
+
+				// Create node if it should exist
+				if tc.nodeExists {
+					node := &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: tc.nodeName,
+						},
+						Spec: corev1.NodeSpec{
+							Taints: tc.initialTaints,
+						},
+						Status: corev1.NodeStatus{
+							Allocatable: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("2"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							},
+						},
+					}
+					_, err := fakeClient.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{})
+					require.NoError(t, err)
+
+					// Create CSINode for taint removal function
+					csiNode := &storagev1.CSINode{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: tc.nodeName,
+						},
+						Spec: storagev1.CSINodeSpec{
+							Drivers: []storagev1.CSINodeDriver{
+								{
+									Name: fakeDriverName,
+								},
+							},
+						},
+					}
+					_, err = fakeClient.StorageV1().CSINodes().Create(ctx, csiNode, metav1.CreateOptions{})
+					require.NoError(t, err)
+				}
+
+				// Create driver with fake client
+				initialDelay := 1 * time.Second
+				d := NewFakeDriver()
+				d.NodeID = tc.nodeName
+				d.kubeClient = fakeClient
+				d.removeNotReadyTaint = tc.featureEnabled
+				d.taintRemovalInitialDelay = initialDelay
+				d.taintRemovalBackoff = wait.Backoff{
+					Duration: 500 * time.Millisecond,
+					Factor:   2,
+					Steps:    10, // Max delay = 0.5 * 2^9 = ~4 minutes
+				}
+				maxBackoffDelay := time.Duration(float64(d.taintRemovalBackoff.Duration) * math.Pow(d.taintRemovalBackoff.Factor, float64(d.taintRemovalBackoff.Steps)-1))
+
+				start := time.Now()
+
+				d.removeNotReadyTaintIfNeeded()
+
+				// Wait for taint removal to start
+				time.Sleep(d.taintRemovalInitialDelay)
+				if tc.expectedError {
+					// Wait max backoff time to ensure retries are done
+					time.Sleep(maxBackoffDelay)
+					t.Logf("Max backoff delay %v\n", maxBackoffDelay)
+				}
+				// Wait for taint removal to finish
+				synctest.Wait()
+				removalTime := time.Since(start)
+				t.Logf("Total taint removal time %v\n", removalTime)
+
+				// Verify taint was removed if expected
+				if tc.nodeExists {
+					node, err := fakeClient.CoreV1().Nodes().Get(ctx, tc.nodeName, metav1.GetOptions{})
+					require.NoError(t, err)
+
+					actualTaints := make([]string, len(node.Spec.Taints))
+					for i, taint := range node.Spec.Taints {
+						actualTaints[i] = taint.Key
+					}
+					assert.Equal(t, tc.expectedTaints, actualTaints)
+				}
+
+				// Verify expected actions were taken
+				actions := fakeClient.Actions()
+				var actualActions []string
+				for _, action := range actions {
+					actualActions = append(actualActions, action.GetVerb())
+				}
+				if tc.expectedPatch {
+					assert.Contains(t, actualActions, "patch")
+				} else {
+					assert.NotContains(t, actualActions, "patch")
+				}
+				if tc.expectedError {
+					assert.Equal(t, initialDelay+maxBackoffDelay, removalTime, "Taint removal should take max backoff time when errors are expected")
+				} else {
+					assert.Equal(t, initialDelay, removalTime, "Taint removal should complete before max backoff time when no errors are expected")
+				}
+			})
+		})
 	}
 }

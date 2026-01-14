@@ -4,9 +4,30 @@ These are the parameters to be passed into the custom StorageClass that users mu
 
 For more information, see the [Azure Managed Lustre Filesystem (AMLFS) service documentation](https://learn.microsoft.com/en-us/azure/azure-managed-lustre/) and the [AMLFS CSI documentation](https://learn.microsoft.com/en-us/azure/azure-managed-lustre/use-csi-driver-kubernetes).
 
-## Dynamic Provisioning (Create an AMLFS Cluster through AKS) - Public Preview
+## CSI Driver Configuration Parameters
 
-> **Public Preview Notice**: Dynamic provisioning functionality is currently in public preview. Some features may not be supported or may have constrained capabilities.
+These parameters control the behavior of the Azure Lustre CSI driver itself and are typically configured during driver installation rather than in StorageClass definitions.
+
+### Node Startup Taint Management
+
+Name | Meaning | Available Value | Default Value | Configuration Method
+--- | --- | --- | --- | ---
+remove-not-ready-taint | Controls whether the CSI driver automatically removes startup taints from nodes when the driver becomes ready. This ensures pods are only scheduled to nodes where the CSI driver is fully operational and Lustre filesystem capacity is available. Nodes should have a taint of the form: `azurelustre.csi.azure.com/agent-not-ready:NoSchedule` | `true`, `false` | `true` | Command-line flag `--remove-not-ready-taint` in driver deployment
+
+#### Startup Taint Details
+
+When enabled (default), the Azure Lustre CSI driver will:
+
+1. **Monitor Node Readiness**: Check if the CSI driver is fully initialized on the node
+2. **Remove Blocking Taint**: Automatically remove the `azurelustre.csi.azure.com/agent-not-ready:NoSchedule` taint when ready
+
+This mechanism prevents pods requiring Azure Lustre storage from being scheduled to nodes where:
+
+- Lustre kernel modules are not yet loaded
+- CSI driver components are not fully initialized
+- Network connectivity to Lustre filesystems is not established
+
+## Dynamic Provisioning (Create an AMLFS Cluster through AKS)
 
 ### Permissions For Kubelet Identity
 
@@ -17,7 +38,7 @@ The kubelet identity attached to the cluster will require the following permissi
 ```text
 Microsoft.Network/virtualNetworks/subnets/read
 Microsoft.Network/virtualNetworks/subnets/join/action
-Microsoft.StorageCache/getRequiredAmlFSSubnetsSize/action
+Microsoft.StorageCache/getRequiredAmlFSSubnetsSize/*
 Microsoft.StorageCache/checkAmlFSSubnets/action
 Microsoft.StorageCache/amlFilesystems/read
 Microsoft.StorageCache/amlFilesystems/write
@@ -51,11 +72,11 @@ vnet-name | The name of the virtual network to be connected to the AMLFS cluster
 subnet-name | The name of the subnet within the virtual network to be connected to the AMLFS cluster. This subnet must already exist. | The name must begin with a letter or number, end with a letter, number, or underscore, and may contain only letters, numbers, underscores, periods, or hyphens. | No | If empty, the driver will use current AKS cluster's subnet
 identities | User-assigned identities to assign to the AMLFS cluster. These identities must already exist. | This must be the resource identifier for the identity e.g., `"/subscriptions/12345678-1234-1234-1234-123456789abc/resourceGroups/myResourceGroup/providers/Microsoft.ManagedIdentity/userAssignedIdentities/myManagedIdentity"`. Multiple values may be provided as a comma-separated list. | No | None
 tags | Tags to apply to the AMLFS cluster resource. These tags do not affect AMLFS cluster functionality. | Tag format: `"key1=val1,key2=val2"`. The tag name has a limit of 512 characters and the tag value has a limit of 256 characters. Tag names can't contain these characters: `<, >, %, &, \, ?, /`. | No | None
-sub-dir | This is the subdirectory within the AMLFS cluster's root directory which is where each pod will actually be mounted within the AMLFS filesystem. This subdirectory does not need to exist beforehand. | This must be a valid Linux file path. It can also interpret metadata such as `"${pvc.metadata.name}"`, `"${pvc.metadata.namespace}"`, `"${pv.metadata.name}"`, `"${pod.metadata.name}"`, `"${pod.metadata.namespace}"`, `"${pod.metadata.uid}"`.| No | None, will default to mounting the root directory of the AMLFS cluster.
+sub-dir | This is the subdirectory within the AMLFS cluster's root directory which is where each pod will actually be mounted within the AMLFS filesystem. This subdirectory does not need to exist beforehand. | This must be a valid Linux file path. It can also interpret metadata such as `"${pvc.metadata.name}"`, `"${pvc.metadata.namespace}"`, `"${pv.metadata.name}"`, `"${pod.metadata.name}"`, `"${pod.metadata.namespace}"`, `"${pod.metadata.uid}"`. | No | None, will default to mounting the root directory of the AMLFS cluster.
 
 ## Static Provisioning (Bring your own AMLFS Cluster through AKS)
 
 Name | Meaning | Available Value | Mandatory | Default value
 --- | --- | --- | --- | ---
 mgs-ip-address | The IP address of the Lustre MGS, see AMLFS cluster details. | Must be a valid IP address i.e., `x.x.x.x` | Yes | This value must be provided.
-sub-dir | This is the subdirectory within the AMLFS cluster's root directory which is where each pod will actually be mounted within the AMLFS filesystem. This subdirectory does not need to exist beforehand. | This must be a valid Linux file path. It can also interpret metadata such as `"${pvc.metadata.name}"`, `"${pvc.metadata.namespace}"`, `"${pv.metadata.name}"`, `"${pod.metadata.name}"`, `"${pod.metadata.namespace}"`, `"${pod.metadata.uid}"`.| No | None, will default to mounting the root directory of the AMLFS cluster.
+sub-dir | This is the subdirectory within the AMLFS cluster's root directory which is where each pod will actually be mounted within the AMLFS filesystem. This subdirectory does not need to exist beforehand. | This must be a valid Linux file path. It can also interpret metadata such as `"${pvc.metadata.name}"`, `"${pvc.metadata.namespace}"`, `"${pv.metadata.name}"`, `"${pod.metadata.name}"`, `"${pod.metadata.namespace}"`, `"${pod.metadata.uid}"`. | No | None, will default to mounting the root directory of the AMLFS cluster.

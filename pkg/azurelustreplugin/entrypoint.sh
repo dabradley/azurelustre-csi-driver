@@ -30,19 +30,19 @@ function add_net_interfaces() {
   ip route list
   interface_list=$(ip route show | sed -n 's/.*\s\+dev\s\+\([^ ]\+\).*/\1/p' | sort -u)
   ethernet_interfaces=()
-  for interface in $interface_list; do
+  for interface in ${interface_list}; do
     interface_info=$(ip link show "${interface}")
     # Skip interfaces that are not needed
-    if [[ "$interface_info" =~ 'SLAVE' ]]; then
+    if [[ "${interface_info}" =~ 'SLAVE' ]]; then
       echo "$(date -u) Not adding slave interface: ${interface}"
-    elif [[ "$interface_info" =~ 'link-netns' ]]; then
+    elif [[ "${interface_info}" =~ 'link-netns' ]]; then
       echo "$(date -u) Not adding namespaced interface: ${interface}"
-    elif [[ "$interface_info" =~ 'UNKNOWN' ]]; then
+    elif [[ "${interface_info}" =~ 'UNKNOWN' ]]; then
       echo "$(date -u) Not adding state unknown interface: ${interface}"
     # Add remaining link/ether interface
-    elif [[ "$interface_info" =~ 'link/ether' ]]; then
+    elif [[ "${interface_info}" =~ 'link/ether' ]]; then
       echo "$(date -u) Including ethernet interface: ${interface}"
-      ethernet_interfaces+=("$interface")
+      ethernet_interfaces+=("${interface}")
     else
       echo "$(date -u) Skipping non-ethernet interface: ${interface}"
     fi
@@ -64,44 +64,70 @@ function add_net_interfaces() {
   done
 }
 
+# Update CA certificates to ensure HTTPS connections work
+update-ca-certificates
+
 installClientPackages=${AZURELUSTRE_CSI_INSTALL_LUSTRE_CLIENT:-yes}
 echo "installClientPackages: ${installClientPackages}"
 
-requiredLustreVersion=${LUSTRE_VERSION:-"2.15.5"}
-echo "requiredLustreVersion: ${requiredLustreVersion}"
-
-requiredClientSha=${CLIENT_SHA_SUFFIX:-"41-gc010524"}
-echo "requiredClientSha: ${requiredClientSha}"
-
-pkgVersion="${requiredLustreVersion}-${requiredClientSha}"
-echo "pkgVersion: ${pkgVersion}"
-
-pkgName="amlfs-lustre-client-${pkgVersion}"
-echo "pkgName: ${pkgName}"
-
-if [[ ! -z $(grep -R 'bionic' /etc/os-release) ]]; then
-  osReleaseCodeName="bionic"
-elif [[ ! -z $(grep -R 'jammy' /etc/os-release) ]]; then
-  osReleaseCodeName="jammy"
-elif [[ ! -z $(grep -R 'focal' /etc/os-release) ]]; then
-  osReleaseCodeName="focal"
-else
-  echo "Unsupported Linux distro"
-  exit 1
-fi
-
-echo "$(date -u) Command line arguments: $@"
-
 if [[ "${installClientPackages}" == "yes" ]]; then
+  if [[ -z ${LUSTRE_VERSION} ]]; then
+    echo "LUSTRE_VERSION environment variable is not set"
+    exit 1
+  fi
+  requiredLustreVersion=${LUSTRE_VERSION}
+  echo "requiredLustreVersion: ${requiredLustreVersion}"
+
+  if [[ -z ${CLIENT_SHA_SUFFIX} ]]; then
+    echo "CLIENT_SHA_SUFFIX environment variable is not set"
+    exit 1
+  fi
+  requiredClientSha="${CLIENT_SHA_SUFFIX}"
+  echo "requiredClientSha: ${requiredClientSha}"
+
+  pkgVersion="${requiredLustreVersion}-${requiredClientSha}"
+  echo "pkgVersion: ${pkgVersion}"
+
+  pkgName="amlfs-lustre-client-${pkgVersion}"
+  echo "pkgName: ${pkgName}"
+
+  osReleaseCodeName=$(. /etc/os-release; echo "${VERSION_CODENAME}")
+  if [[ -z "${osReleaseCodeName}" ]]; then
+    echo "Could not determine OS release codename"
+    exit 1
+  fi
+
+  if ! grep -q -R "${osReleaseCodeName}" /etc/host-os-release; then
+    hostCodeName=$(. /etc/host-os-release; echo "${VERSION_CODENAME}")
+    if [[ "${hostCodeName}" == "focal" && "${osReleaseCodeName}" == "jammy" ]]; then
+      echo "Allowing jammy container on focal host, this usage is deprecated and will be removed in future"
+    else
+      echo "Incompatible host OS detected: ${hostCodeName}, expected: ${osReleaseCodeName}"
+      exit 1
+    fi
+  fi
+
+  echo "$(date -u) Command line arguments: $*"
+
   kernelVersion=$(uname -r)
 
   echo "$(date -u) Installing Lustre client packages for OS=${osReleaseCodeName}, kernel=${kernelVersion} "
 
-  if [ ! -f /etc/apt/sources.list.d/amlfs.list ] ||  ! ls /var/lib/apt/lists  | grep "packages.microsoft.com_repos_amlfs" &> /dev/null; then
-    curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
-    echo "deb [arch=amd64] https://packages.microsoft.com/repos/amlfs-${osReleaseCodeName}/ ${osReleaseCodeName} main" | tee /etc/apt/sources.list.d/amlfs.list
-    apt-get update
+  ARCH=$(uname -m)
+  if [[ "${ARCH}" != "x86_64" && "${ARCH}" != "aarch64" ]]; then
+    echo "$(date -u) Error: Unsupported architecture: ${ARCH}"
+    exit 1
   fi
+  if [[ "${ARCH}" == "x86_64" ]]; then
+    ARCH="amd64"
+  else
+    ARCH="arm64"
+  fi
+
+  echo "$(date -u) Adding Microsoft package repository for Lustre client modules, architecture=${ARCH}."
+  curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+  echo "deb [arch=${ARCH}] https://packages.microsoft.com/repos/amlfs-${osReleaseCodeName}/ ${osReleaseCodeName} main" | tee /etc/apt/sources.list.d/amlfs.list
+  apt-get update
 
   echo "$(date -u) Installing Lustre client modules: ${pkgName}=${kernelVersion}"
 
@@ -112,7 +138,7 @@ if [[ "${installClientPackages}" == "yes" ]]; then
     # grub issue
     # https://stackoverflow.com/questions/40748363/virtual-machine-apt-get-grub-issue/40751712
     if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::options::="--force-confdef" -o DPkg::options::="--force-confold" \
-      ${pkgName}=${kernelVersion}; then
+      "${pkgName}=${kernelVersion}"; then
       echo "$(date -u) Error installing Lustre client modules. Will try removing existing versions"
       # Check if lustre_rmmod is available, attempt to unload the modules if so.
       # If modules are already uninstalled, this will still pass
@@ -125,7 +151,7 @@ if [[ "${installClientPackages}" == "yes" ]]; then
       echo "$(date -u) Uninstalling existing Lustre client versions."
       apt-get remove --purge -y '*lustre-client*' || true
       tries=$((tries - 1))
-      sleep $sleep_before_retry
+      sleep "${sleep_before_retry}"
       sleep_before_retry=$((sleep_before_retry * 2))
     else
       install_success=true
@@ -177,7 +203,7 @@ fi
 
 echo "$(date -u) Entering Lustre CSI driver"
 
-echo Executing: $1 ${2-} ${3-} ${4-} ${5-} ${6-} ${7-} ${8-} ${9-}
+echo Executing: "$1 ${2-} ${3-} ${4-} ${5-} ${6-} ${7-} ${8-} ${9-}"
 $1 ${2-} ${3-} ${4-} ${5-} ${6-} ${7-} ${8-} ${9-}
 
 echo "$(date -u) Exiting Lustre CSI driver"

@@ -125,8 +125,8 @@ func TestCreateVolume_Success_DoesNotCallDynamicProvisioner(t *testing.T) {
 	req := buildCreateVolumeRequest()
 	_, err := d.CreateVolume(context.Background(), req)
 	require.NoError(t, err)
-	assert.Empty(t, fakeDynamicProvisioner.Filesystems, 0)
-	assert.Empty(t, fakeDynamicProvisioner.fakeCallCount, 0, "unexpected calls made to dynamic provisioner, all calls: %#v", fakeDynamicProvisioner.fakeCallCount)
+	assert.Empty(t, fakeDynamicProvisioner.Filesystems)
+	assert.Empty(t, fakeDynamicProvisioner.fakeCallCount, "unexpected calls made to dynamic provisioner, all calls: %#v", fakeDynamicProvisioner.fakeCallCount)
 }
 
 func TestDynamicCreateVolume_Success(t *testing.T) {

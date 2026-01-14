@@ -18,7 +18,7 @@ REGISTRY ?= azurelustre.azurecr.io
 REGISTRY_NAME ?= $(shell echo $(REGISTRY) | sed "s/.azurecr.io//g")
 TARGET ?= csi
 IMAGE_NAME ?= azurelustre-$(TARGET)
-IMAGE_VERSION ?= v0.3.0
+IMAGE_VERSION ?= v0.3.1
 CLOUD ?= AzurePublicCloud
 # Use a custom version for E2E tests if we are in Prow
 ifdef CI
@@ -139,11 +139,12 @@ azurelustre-darwin:
 #
 .PHONY: quickcontainer
 quickcontainer: quicklustre
-	docker build -t $(IMAGE_TAG) --output=type=docker -f $(dockerfile) .
-
+	docker build -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f $(dockerfile) .
+	docker build -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f $(dockerfile) .
 .PHONY: container
 container: $(build_lustre_source_code)
-	docker build -t $(IMAGE_TAG) --output=type=docker -f $(dockerfile) .
+	docker build -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f $(dockerfile) .
+	docker build -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f $(dockerfile) .
 
 .PHONY: container-linux
 container-linux:
@@ -172,7 +173,8 @@ ifdef CI
 	docker manifest push --purge $(IMAGE_TAG)
 	docker manifest inspect $(IMAGE_TAG)
 else
-	docker push $(IMAGE_TAG)
+	docker push $(IMAGE_TAG)-jammy
+	docker push $(IMAGE_TAG)-noble
 endif
 
 .PHONY: push-latest
@@ -182,13 +184,23 @@ ifdef CI
 	docker manifest push --purge $(IMAGE_TAG_LATEST)
 	docker manifest inspect $(IMAGE_TAG_LATEST)
 else
-	docker push $(IMAGE_TAG_LATEST)
+	docker tag $(IMAGE_TAG)-jammy $(IMAGE_TAG_LATEST)-jammy
+	docker tag $(IMAGE_TAG)-noble $(IMAGE_TAG_LATEST)-noble
+	docker push $(IMAGE_TAG_LATEST)-jammy
+	docker push $(IMAGE_TAG_LATEST)-noble
 endif
 
 .PHONY: build-push
-build-push: $(build_lustre_source_code)
-	docker tag $(IMAGE_TAG) $(IMAGE_TAG_LATEST)
-	docker push $(IMAGE_TAG_LATEST)
+build-push: container push
+
+.PHONY: build-push-quick
+build-push-quick: quickcontainer push
+
+.PHONY: build-push-latest
+build-push-latest: container push-latest
+
+.PHONY: build-push-quick-latest
+build-push-quick-latest: quickcontainer push-latest
 
 #
 # IOR: docker build & publish

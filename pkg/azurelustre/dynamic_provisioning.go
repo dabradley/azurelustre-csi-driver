@@ -132,9 +132,10 @@ func (d *DynamicProvisioner) currentClusterState(ctx context.Context, resourceGr
 	}
 
 	if resp.Properties != nil && resp.Properties.ProvisioningState != nil {
-		if *resp.Properties.ProvisioningState == armstoragecache.AmlFilesystemProvisioningStateTypeDeleting {
+		switch *resp.Properties.ProvisioningState { //nolint:exhaustive // We are only trying to react to these states
+		case armstoragecache.AmlFilesystemProvisioningStateTypeDeleting:
 			return ClusterStateDeleting, nil
-		} else if *resp.Properties.ProvisioningState == armstoragecache.AmlFilesystemProvisioningStateTypeFailed {
+		case armstoragecache.AmlFilesystemProvisioningStateTypeFailed:
 			return ClusterStateFailed, nil
 		}
 	}
@@ -425,8 +426,11 @@ func (d *DynamicProvisioner) getAmlfsSubnetSize(ctx context.Context, sku string,
 		klog.Errorf("failed to get required AMLFS subnet size for SKU: %s, cluster size: %f, error: %v", sku, clusterSize, err)
 		return 0, convertHTTPResponseErrorToGrpcCodeError(err)
 	}
-
-	return int(*reqSize.RequiredAmlFilesystemSubnetsSize.FilesystemSubnetSize), nil
+	if reqSize.FilesystemSubnetSize == nil {
+		klog.Errorf("received nil FilesystemSubnetSize from GetRequiredAmlFSSubnetsSize for SKU: %s, cluster size: %f", sku, clusterSize)
+		return 0, status.Error(codes.Internal, "received nil FilesystemSubnetSize from storage management client")
+	}
+	return int(*reqSize.FilesystemSubnetSize), nil
 }
 
 func (d *DynamicProvisioner) checkSubnetAddresses(ctx context.Context, vnetResourceGroup, vnetName, subnetID string) (int, error) {
@@ -469,9 +473,9 @@ func (d *DynamicProvisioner) CheckSubnetCapacity(ctx context.Context, subnetInfo
 	}
 
 	if requiredSubnetIPSize > availableIPs {
-		klog.Warningf("There is not enough room in the %s subnetID to fit a %s SKU cluster: %v needed, %v available", subnetInfo.SubnetID, sku, requiredSubnetIPSize, availableIPs)
+		klog.Warningf("There is not enough room in the %s subnet to fit a %s SKU cluster: %v needed, %v available", subnetInfo.SubnetID, sku, requiredSubnetIPSize, availableIPs)
 		return false, nil
 	}
-	klog.V(2).Infof("There is enough room in the %s subnetID to fit a %s SKU cluster: %v needed, %v available", subnetInfo.SubnetID, sku, requiredSubnetIPSize, availableIPs)
+	klog.V(2).Infof("There is enough room in the %s subnet to fit a %s SKU cluster: %v needed, %v available", subnetInfo.SubnetID, sku, requiredSubnetIPSize, availableIPs)
 	return true, nil
 }
