@@ -20,22 +20,22 @@ set -o nounset
 
 REPO_ROOT_PATH=${REPO_ROOT_PATH:-$(git rev-parse --show-toplevel)}
 
-pushd "$REPO_ROOT_PATH/test/long-haul/"
+pushd "${REPO_ROOT_PATH}/test/long-haul/"
 source ./utils.sh
 
-export REPO_ROOT_PATH=$REPO_ROOT_PATH
+export REPO_ROOT_PATH=${REPO_ROOT_PATH}
 export ClusterName="${aks_cluster_name}"
 export ResourceGroup="${aks_resource_group}"
 export PoolName="${aks_pool_name}"
 export LustreFSName="${lustre_fs_name}"
 export LustreFSIP="${lustre_fs_ip}"
 
-sed -i "s/{longhaul_agentpool}/$PoolName/g;s/{lustre_fs_name}/$LustreFSName/g;s/{lustre_fs_ip}/$LustreFSIP/g" ./sample-workload/deployment_write_print_file.yaml
-sed -i "s/{longhaul_agentpool}/$PoolName/g;s/{lustre_fs_name}/$LustreFSName/g;s/{lustre_fs_ip}/$LustreFSIP/g" ./cleanup/cleanupjob.yaml
+sed -i "s/{longhaul_agentpool}/${PoolName}/g;s/{lustre_fs_name}/${LustreFSName}/g;s/{lustre_fs_ip}/${LustreFSIP}/g" ./sample-workload/deployment_write_print_file.yaml
+sed -i "s/{longhaul_agentpool}/${PoolName}/g;s/{lustre_fs_name}/${LustreFSName}/g;s/{lustre_fs_ip}/${LustreFSIP}/g" ./cleanup/cleanupjob.yaml
 
-print_logs_info "Connecting to AKS Cluster=$ClusterName, ResourceGroup=$ResourceGroup, AKS pool=$PoolName"
-az configure --defaults group=$ResourceGroup
-az aks get-credentials --resource-group $ResourceGroup --name $ClusterName
+print_logs_info "Connecting to AKS Cluster=${ClusterName}, ResourceGroup=${ResourceGroup}, AKS pool=${PoolName}"
+az configure --defaults group="${ResourceGroup}"
+az aks get-credentials --resource-group "${ResourceGroup}" --name "${ClusterName}"
 
 print_logs_case "Executing fault test"
 ./fault-test.sh

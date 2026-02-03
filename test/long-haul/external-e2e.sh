@@ -19,15 +19,17 @@ set -o pipefail
 set -o nounset
 set -o xtrace
 
-export kubernetesVersion=v$(az aks list | jq -r ".[0].currentKubernetesVersion")
+export kubernetesVersion
+kubernetesVersion=v$(az aks list | jq -r ".[0].currentKubernetesVersion")
 echo "Current kubernetes version is ${kubernetesVersion}"
 
 echo "Downloading kubectl ${kubernetesVersion}"
-curl -Lo ${REPO_ROOT_PATH}/kubectl "https://dl.k8s.io/release/${kubernetesVersion}/bin/linux/amd64/kubectl"
-chmod a+x ${REPO_ROOT_PATH}/kubectl
-export PATH=$(pwd):${PATH}
+curl -Lo "${REPO_ROOT_PATH}/kubectl" "https://dl.k8s.io/release/${kubernetesVersion}/bin/linux/amd64/kubectl"
+chmod a+x "${REPO_ROOT_PATH}/kubectl"
+export PATH
+PATH=$(pwd):${PATH}
 
 export LUSTRE_FS_NAME=${LustreFSName}
 export LUSTRE_MGS_IP=${LustreFSIP}
 
-${REPO_ROOT_PATH}/test/external-e2e/run.sh
+"${REPO_ROOT_PATH}/test/external-e2e/run.sh"
