@@ -39,7 +39,8 @@ fast_exit () {
 reset_csi_driver () {
     echo "Reset CSI driver"
 
-    for i in $(kubectl get daemonsets.apps -n kube-system -o name | grep -F 'csi-azurelustre-node'); do
+    # Delete all daemonsets with app=csi-azurelustre-node label (handles all flavors)
+    for i in $(kubectl get daemonsets.apps -n kube-system -l app=csi-azurelustre-node -o name); do
         kubectl delete -n kube-system $i
     done
 
@@ -144,7 +145,7 @@ verify_csi_driver () {
         print_logs_info "2 controller pods running..."
     fi
 
-    nodePodsNum=$(kubectl get po -o wide -n kube-system --field-selector=status.phase=Running | grep "$PoolName" | grep "csi-azurelustre-node" | wc -l)
+    nodePodsNum=$(kubectl get po -o wide -n kube-system -l app=csi-azurelustre-node --field-selector=status.phase=Running | grep "$PoolName" | wc -l)
     workerNodeNum=$(get_worker_node_num)
 
     if  [ "$nodePodsNum" != "$workerNodeNum" ]
