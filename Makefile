@@ -19,6 +19,7 @@ REGISTRY_NAME ?= $(shell echo $(REGISTRY) | sed "s/.azurecr.io//g")
 TARGET ?= csi
 IMAGE_NAME ?= azurelustre-$(TARGET)
 IMAGE_VERSION ?= v0.3.1
+export REPOSITORY ?= $(REGISTRY)/$(IMAGE_NAME)
 CLOUD ?= AzurePublicCloud
 # Use a custom version for E2E tests if we are in Prow
 ifdef CI
@@ -26,11 +27,11 @@ ifndef PUBLISH
 override IMAGE_VERSION := e2e-$(GIT_COMMIT)
 endif
 endif
-IMAGE_TAG ?= $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_VERSION)
-IMAGE_TAG_LATEST = $(REGISTRY)/$(IMAGE_NAME):latest
+IMAGE_TAG ?= $(REPOSITORY):$(IMAGE_VERSION)
+IMAGE_TAG_LATEST = $(REPOSITORY):latest
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS ?= "-X ${PKG}/pkg/azurelustre.driverVersion=${IMAGE_VERSION} -X ${PKG}/pkg/azurelustre.gitCommit=${GIT_COMMIT} -X ${PKG}/pkg/azurelustre.buildDate=${BUILD_DATE} -s -w -extldflags '-static'"
-E2E_HELM_OPTIONS ?= --set image.azurelustre.pullPolicy=Always --set image.azurelustre.repository=$(REGISTRY)/$(IMAGE_NAME) --set image.azurelustre.tag=$(IMAGE_VERSION) --set driver.userAgentSuffix="e2e-test"
+E2E_HELM_OPTIONS ?= --set image.azurelustre.pullPolicy=Always --set image.azurelustre.repository=$(REPOSITORY) --set image.azurelustre.tag=$(IMAGE_VERSION) --set driver.userAgentSuffix="e2e-test"
 ifdef ENABLE_AZURELUSTRE
 override E2E_HELM_OPTIONS := $(E2E_HELM_OPTIONS) --set controller.logLevel=6 --set node.logLevel=6
 endif

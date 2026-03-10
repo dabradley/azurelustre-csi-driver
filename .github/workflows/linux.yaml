@@ -26,7 +26,8 @@ jobs:
 
         export PATH=$PATH:$HOME/.local/bin
         sudo apt-get update
-        make verify
+        # Setting these values to ensure helm chart consistency with deployment yaml
+        REGISTRY="mcr.microsoft.com" IMAGE_NAME="oss/v2/kubernetes-csi/azurelustre-csi" make verify
 
     - name: Run build test
       run: |
