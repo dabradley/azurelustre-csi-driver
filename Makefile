@@ -18,7 +18,7 @@ REGISTRY ?= azurelustre.azurecr.io
 REGISTRY_NAME ?= $(shell echo $(REGISTRY) | sed "s/.azurecr.io//g")
 TARGET ?= csi
 IMAGE_NAME ?= azurelustre-$(TARGET)
-IMAGE_VERSION ?= v0.3.1
+IMAGE_VERSION ?= v0.4.0
 CLOUD ?= AzurePublicCloud
 # Use a custom version for E2E tests if we are in Prow
 ifdef CI
@@ -39,9 +39,9 @@ GINKGO_FLAGS = -ginkgo.v
 GO111MODULE = on
 GOPATH ?= $(shell go env GOPATH)
 GOBIN ?= $(GOPATH)/bin
-CGO_ENABLED ?= 0
+CGO_ENABLED ?= 1
 DOCKER_CLI_EXPERIMENTAL = enabled
-export GOPATH GOBIN GO111MODULE DOCKER_CLI_EXPERIMENTAL
+export GOPATH GOBIN GO111MODULE DOCKER_CLI_EXPERIMENTAL CGO_ENABLED
 
 # The current context of image building
 # The architecture of the image
@@ -116,23 +116,15 @@ e2e-teardown:
 #
 .PHONY: quicklustre
 quicklustre:
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
+	GOOS=linux GOARCH=$(ARCH) go build -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
 
 .PHONY: azurelustre
 azurelustre:
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -a -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
+	GOOS=linux GOARCH=$(ARCH) go build -a -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
 
 .PHONY: azurelustre-dalec
 azurelustre-dalec:
 	GOOS=linux go build -a -ldflags ${LDFLAGS} -mod vendor -o /app/azurelustreplugin ./pkg/azurelustreplugin
-
-.PHONY: azurelustre-windows
-azurelustre-windows:
-	CGO_ENABLED=0 GOOS=windows go build -a -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin.exe ./pkg/azurelustreplugin
-
-.PHONT: azurelustre-darwin
-azurelustre-darwin:
-	CGO_ENABLED=0 GOOS=darwin go build -a -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
 
 #
 # Azure Lustre: Docker build

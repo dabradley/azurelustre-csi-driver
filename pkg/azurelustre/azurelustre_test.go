@@ -52,7 +52,7 @@ var DefaultLocationSkuValues = map[string]*LustreSkuValue{
 const (
 	fakeNodeID                = "fakeNodeID"
 	fakeDriverName            = "fake"
-	vendorVersion             = "0.3.1"
+	vendorVersion             = "0.4.0"
 	clusterRequestFailureName = "testShouldFail"
 	driverDefaultLocation     = "defaultFakeLocation"
 	emptyZonesLocation        = "emptyZonesLocation"
