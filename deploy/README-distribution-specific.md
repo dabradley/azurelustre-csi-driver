@@ -14,7 +14,7 @@ This directory contains distribution-specific DaemonSet deployments for the Azur
 Each deployment uses:
 
 1. **Node Targeting**: Uses node affinity and selectors to match correct node OS flavors
-2. **Container Image**: Version-specific image tags like `v0.3.1-jammy`, `v0.3.1-noble`
+2. **Container Image**: Version-specific image tags like `v0.4.0-jammy`, `v0.4.0-noble`
 3. **Unique Names**: Each DaemonSet has a unique name (`csi-azurelustre-node-jammy`) to prevent conflicts
 
 ## Installation

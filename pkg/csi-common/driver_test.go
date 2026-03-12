@@ -31,7 +31,7 @@ const (
 	fakeNodeID     = "fakeNodeID"
 )
 
-var vendorVersion = "0.3.1"
+var vendorVersion = "0.4.0"
 
 func TestNewCSIDriver(t *testing.T) {
 	name := ""
