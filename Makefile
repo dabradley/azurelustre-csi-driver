@@ -18,7 +18,7 @@ REGISTRY ?= azurelustre.azurecr.io
 REGISTRY_NAME ?= $(shell echo $(REGISTRY) | sed "s/.azurecr.io//g")
 TARGET ?= csi
 IMAGE_NAME ?= azurelustre-$(TARGET)
-IMAGE_VERSION ?= v0.3.1
+IMAGE_VERSION ?= v0.4.0
 CLOUD ?= AzurePublicCloud
 # Use a custom version for E2E tests if we are in Prow
 ifdef CI
@@ -39,9 +39,9 @@ GINKGO_FLAGS = -ginkgo.v
 GO111MODULE = on
 GOPATH ?= $(shell go env GOPATH)
 GOBIN ?= $(GOPATH)/bin
-CGO_ENABLED ?= 0
+CGO_ENABLED ?= 1
 DOCKER_CLI_EXPERIMENTAL = enabled
-export GOPATH GOBIN GO111MODULE DOCKER_CLI_EXPERIMENTAL
+export GOPATH GOBIN GO111MODULE DOCKER_CLI_EXPERIMENTAL CGO_ENABLED
 
 # The current context of image building
 # The architecture of the image
@@ -116,34 +116,27 @@ e2e-teardown:
 #
 .PHONY: quicklustre
 quicklustre:
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
+	GOOS=linux GOARCH=$(ARCH) go build -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
 
 .PHONY: azurelustre
 azurelustre:
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -a -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
+	GOOS=linux GOARCH=$(ARCH) go build -a -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
 
 .PHONY: azurelustre-dalec
 azurelustre-dalec:
 	GOOS=linux go build -a -ldflags ${LDFLAGS} -mod vendor -o /app/azurelustreplugin ./pkg/azurelustreplugin
-
-.PHONY: azurelustre-windows
-azurelustre-windows:
-	CGO_ENABLED=0 GOOS=windows go build -a -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin.exe ./pkg/azurelustreplugin
-
-.PHONT: azurelustre-darwin
-azurelustre-darwin:
-	CGO_ENABLED=0 GOOS=darwin go build -a -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
 
 #
 # Azure Lustre: Docker build
 #
 .PHONY: quickcontainer
 quickcontainer: quicklustre
-	docker build -t $(IMAGE_TAG) --output=type=docker -f $(dockerfile) .
-
+	docker build -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f $(dockerfile) .
+	docker build -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f $(dockerfile) .
 .PHONY: container
 container: $(build_lustre_source_code)
-	docker build -t $(IMAGE_TAG) --output=type=docker -f $(dockerfile) .
+	docker build -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f $(dockerfile) .
+	docker build -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f $(dockerfile) .
 
 .PHONY: container-linux
 container-linux:
@@ -172,7 +165,8 @@ ifdef CI
 	docker manifest push --purge $(IMAGE_TAG)
 	docker manifest inspect $(IMAGE_TAG)
 else
-	docker push $(IMAGE_TAG)
+	docker push $(IMAGE_TAG)-jammy
+	docker push $(IMAGE_TAG)-noble
 endif
 
 .PHONY: push-latest
@@ -182,13 +176,23 @@ ifdef CI
 	docker manifest push --purge $(IMAGE_TAG_LATEST)
 	docker manifest inspect $(IMAGE_TAG_LATEST)
 else
-	docker push $(IMAGE_TAG_LATEST)
+	docker tag $(IMAGE_TAG)-jammy $(IMAGE_TAG_LATEST)-jammy
+	docker tag $(IMAGE_TAG)-noble $(IMAGE_TAG_LATEST)-noble
+	docker push $(IMAGE_TAG_LATEST)-jammy
+	docker push $(IMAGE_TAG_LATEST)-noble
 endif
 
 .PHONY: build-push
-build-push: $(build_lustre_source_code)
-	docker tag $(IMAGE_TAG) $(IMAGE_TAG_LATEST)
-	docker push $(IMAGE_TAG_LATEST)
+build-push: container push
+
+.PHONY: build-push-quick
+build-push-quick: quickcontainer push
+
+.PHONY: build-push-latest
+build-push-latest: container push-latest
+
+.PHONY: build-push-quick-latest
+build-push-quick-latest: quickcontainer push-latest
 
 #
 # IOR: docker build & publish

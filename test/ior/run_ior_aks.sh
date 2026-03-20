@@ -25,8 +25,8 @@ repo="$(git rev-parse --show-toplevel)/test/ior"
 
 skipSetup=${1:-"false"}
 
-if [[ "$skipSetup" == "false" ]]; 
-then 
+if [[ "$skipSetup" == "false" ]];
+then
     echo "Removing IOR pods"
     kubectl delete -f $repo/pod.yaml --ignore-not-found
     sleep 15

@@ -17,41 +17,49 @@
 
 If the exec-based readiness probe fails (exit code 1), use these detailed verification steps:
 
-```shell
+```sh
 # Verify detailed probe configuration
 kubectl describe -n kube-system pod -l app=csi-azurelustre-node
 ```
+
 Look for exec-based probe configuration in the pod description:
+
 - `Readiness: exec [/app/readinessProbe.sh]`
 - `Startup: exec [/app/readinessProbe.sh]`
 
 In the Events section, you may see initial startup probe failures during LNet initialization:
+
 - `Warning Unhealthy ... Startup probe failed: Node pod detected - performing Lustre-specific readiness checks`
 
 This is normal during the initialization phase. Once LNet is fully operational, the probes will succeed.
 
-```shell
+```sh
 # Test the readiness probe script directly
 kubectl exec -n kube-system <pod-name> -c azurelustre -- /app/readinessProbe.sh
 ```
+
 Expected output when working correctly:
+
 - `"Node pod detected - performing Lustre-specific readiness checks"`
 - `"All Lustre readiness checks passed"`
 
-```shell
+```sh
 # Check for enhanced validation messages
 kubectl logs -n kube-system -l app=csi-azurelustre-node -c azurelustre --tail=20
 ```
+
 Look for CSI driver startup and readiness messages:
+
 - `"vendor_version":"v0.4.0-readiness-http"` - Confirms feature branch deployment
 - Standard CSI GRPC operation logs indicating successful driver initialization
 
-```shell
+```sh
 # Check for detailed validation failure reasons
 kubectl logs -n kube-system <pod-name> -c azurelustre | grep -E "(LNet validation failed|Failed to|not operational)"
 ```
 
 Common issues and solutions:
+
 - **"No valid NIDs"**: LNet networking not properly configured
 - **"Self-ping test failed"**: Network connectivity issues
 - **"Interfaces not operational"**: Network interfaces not in UP state
@@ -65,6 +73,7 @@ kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- /app/re
 ```
 
 Expected responses:
+
 - Exit code 0: Enhanced LNet validation passed
 - Exit code 1: One or more validation checks failed (with descriptive error message)
 
@@ -76,6 +85,7 @@ kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- curl -s
 ```
 
 HTTP responses:
+
 - `/healthz`: `ok` (HTTP 200) or `not ready` (HTTP 503)
 
 **Check enhanced validation logs:**
@@ -86,6 +96,7 @@ kubectl logs -n kube-system <csi-azurelustre-node-pod> -c azurelustre | grep -E 
 ```
 
 Look for validation success messages:
+
 - `"LNet validation passed: all checks successful"`
 - `"Found NIDs: <network-identifiers>"`
 - `"LNet self-ping to <nid> successful"`
@@ -94,31 +105,39 @@ Look for validation success messages:
 **Common readiness failure patterns:**
 
 1. **No valid NIDs found:**
+
    ```text
    LNet validation failed: no valid NIDs
    No valid non-loopback LNet NIDs found
    ```
+
    **Solution:** Check LNet configuration and network setup
 
 2. **Self-ping test failed:**
+
    ```text
    LNet validation failed: self-ping test failed
    LNet self-ping to <nid> failed
    ```
+
    **Solution:** Verify network connectivity and LNet networking
 
 3. **Interfaces not operational:**
+
    ```text
    LNet validation failed: interfaces not operational
    Found non-operational interface: status: down
    ```
+
    **Solution:** Check network interface status and configuration
 
 4. **Module loading issues:**
+
    ```text
    Lustre module not loaded
    LNet kernel module is not loaded
    ```
+
    **Solution:** Check kernel module installation and loading
 
 **Debug LNet configuration manually:**
@@ -150,6 +169,454 @@ kubectl describe -n kube-system pod <csi-azurelustre-node-pod> | grep -A 10 -E "
 # Watch probe events in real-time
 kubectl get events --field-selector involvedObject.name=<csi-azurelustre-node-pod> -n kube-system -w | grep -E "(Readiness|Liveness)"
 ```
+
+---
+
+## OS-Specific DaemonSet Issues
+
+The Azure Lustre CSI driver uses distribution-specific DaemonSets to ensure proper Lustre client compatibility across different Ubuntu versions. Each DaemonSet targets specific node OS versions using node selectors and affinity rules.
+
+### No CSI Driver Pods on Nodes
+
+**Symptoms:**
+
+- Nodes exist in the cluster but have no CSI driver pods running
+- Pods requiring Lustre volumes remain in `Pending` or `ContainerCreating` state
+- kubectl shows `0/N nodes are available` for pods with Lustre PVCs
+- Node has no CSI driver pod scheduled despite DaemonSets being deployed
+
+**Check node OS labels:**
+
+```sh
+# Check the OS SKU label on all nodes
+kubectl get nodes -o custom-columns=NAME:.metadata.name,OS-SKU:.metadata.labels.'kubernetes\.azure\.com/os-sku-effective'
+```
+
+Expected output:
+
+```text
+NAME                                OS-SKU
+aks-nodepool1-12345678-vmss000000  Ubuntu2204
+aks-nodepool2-23456789-vmss000001  Ubuntu2404
+```
+
+**Possible Causes:**
+
+- Node OS version doesn't match any DaemonSet selector
+- Missing or incorrect `kubernetes.azure.com/os-sku-effective` label
+- Unsupported Ubuntu version
+- Node labels were manually modified or are missing
+
+**Debugging Steps:**
+
+```sh
+# List all CSI driver pods and their nodes
+kubectl get pods -n kube-system -l app=csi-azurelustre-node -o wide
+
+# Check which DaemonSets are deployed
+kubectl get daemonsets -n kube-system -l app=csi-azurelustre-node
+
+# Check DaemonSet desired vs ready counts
+kubectl get ds -n kube-system csi-azurelustre-node-jammy
+kubectl get ds -n kube-system csi-azurelustre-node-noble
+
+# Inspect node labels in detail
+kubectl get node <node-name> --show-labels | grep os-sku-effective
+
+# Check DaemonSet pod scheduling status for a specific node
+kubectl get events -n kube-system --field-selector involvedObject.kind=DaemonSet --sort-by='.lastTimestamp' | grep csi-azurelustre-node
+```
+
+**Resolution:**
+
+1. **For nodes with missing or non-standard labels:**
+
+   Modify the DaemonSet node selector or affinity rules to match your node's actual labels:
+
+   ```sh
+   # Edit the DaemonSet to adjust node selectors
+   kubectl edit ds -n kube-system csi-azurelustre-node-jammy
+
+   # Or modify the affinity matchExpressions to include your node's label value
+   # For example, add additional values to the kubernetes.azure.com/os-sku-effective operator
+   ```
+
+   Example modification for the affinity section:
+
+   ```yaml
+   affinity:
+     nodeAffinity:
+       requiredDuringSchedulingIgnoredDuringExecution:
+         nodeSelectorTerms:
+           - matchExpressions:
+               - key: kubernetes.azure.com/os-sku-effective
+                 operator: In
+                 values:
+                   - Ubuntu2204
+                   - Ubuntu2004
+                   - <your-custom-label-value>
+   ```
+
+   After editing, the DaemonSet will automatically schedule pods on matching nodes.
+
+2. **If upgrading from driver version < v0.4.0:**
+
+   Uninstall the old driver before deploying the new OS-specific DaemonSets:
+
+   ```sh
+   # Uninstall the previous driver version
+   ./deploy/uninstall-driver.sh
+
+   # Then install the new version with OS-specific DaemonSets
+   ./deploy/install-driver.sh
+   ```
+
+   Versions prior to v0.4.0 used a single DaemonSet without OS-specific targeting, which conflicts with the new distribution-specific architecture.
+
+3. **For unsupported Ubuntu versions:**
+
+   - Upgrade node pool to Ubuntu 22.04 or 24.04 (CVMs are supported with 20.04)
+   - Create a new node pool with a supported OS version
+   - Migrate workloads to supported nodes
+
+---
+
+### Multiple CSI Driver Pods on Same Node
+
+**Symptoms:**
+
+- A single node has multiple CSI driver pods running simultaneously
+- Multiple DaemonSet pods from different flavors (jammy/noble) on the same node
+- Unexpected behavior or conflicts during volume mounting
+- Resource contention on nodes
+
+**Check for multiple pods per node:**
+
+```sh
+# List all CSI driver pods grouped by node
+kubectl get pods -n kube-system -l app=csi-azurelustre-node -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeName,FLAVOR:.metadata.labels.flavor | sort -k2
+
+# Count CSI driver pods per node
+kubectl get pods -n kube-system -l app=csi-azurelustre-node -o json | \
+  jq -r '.items[] | "\(.spec.nodeName) \(.metadata.labels.flavor)"' | \
+  sort | uniq -c
+```
+
+**Possible Causes:**
+
+- Node has multiple matching OS SKU labels (should not happen in normal AKS)
+- DaemonSet node selectors are overlapping or misconfigured
+- Manual label modifications creating ambiguous node targeting
+- Label `kubernetes.azure.com/os-sku-effective` changed while pods were running
+
+**Debugging Steps:**
+
+```sh
+# Check node labels that match multiple DaemonSets
+kubectl get node <node-name> -o jsonpath='{.metadata.labels}' | jq
+
+# Inspect DaemonSet node affinity rules
+kubectl get ds -n kube-system csi-azurelustre-node-jammy -o yaml | grep -A20 affinity
+kubectl get ds -n kube-system csi-azurelustre-node-noble -o yaml | grep -A20 affinity
+
+# Check for pods that should not be on a node
+kubectl describe pod -n kube-system <duplicate-pod-name> | grep -A10 "Node-Selectors\|Node Affinity"
+```
+
+**Resolution:**
+
+1. **Identify the correct OS version:**
+
+   ```sh
+   # Check actual OS on the node
+   kubectl debug node/<node-name> -it --image=ubuntu -- cat /etc/os-release
+   ```
+
+2. **Remove incorrect pods:**
+
+   ```sh
+   # Delete the pod that doesn't match the node's actual OS
+   kubectl delete pod -n kube-system <incorrect-pod-name>
+   ```
+
+3. **Fix node labels if incorrect:**
+
+   ```sh
+   # Remove incorrect label
+   kubectl label node <node-name> kubernetes.azure.com/os-sku-effective-
+
+   # Add correct label
+   kubectl label node <node-name> kubernetes.azure.com/os-sku-effective=Ubuntu2204
+   ```
+
+4. **If upgrading from driver version < v0.4.0:**
+
+   Uninstall the old driver before deploying the new OS-specific DaemonSets:
+
+   ```sh
+   # Uninstall the previous driver version
+   ./deploy/uninstall-driver.sh
+
+   # Then install the new version with OS-specific DaemonSets
+   ./deploy/install-driver.sh
+   ```
+
+   Versions prior to v0.4.0 used a single DaemonSet without OS-specific targeting, which can result in multiple pods on the same node when upgrading.
+
+5. **Prevent future occurrences:**
+
+   - Avoid manually modifying OS-related node labels
+   - Let AKS manage the `kubernetes.azure.com/os-sku-effective` label
+   - Review any automation that might be modifying node labels
+
+---
+
+### DaemonSet Pod Image Pull Failures
+
+**Symptoms:**
+
+- CSI driver pods stuck in `ImagePullBackOff` or `ErrImagePull` state
+- Events show image pull errors for specific OS-tagged images
+- Some nodes have working pods while others fail
+
+**Check pod status and events:**
+
+```sh
+# List pods with image pull issues
+kubectl get pods -n kube-system -l app=csi-azurelustre-node | grep -E "ImagePullBackOff|ErrImagePull"
+
+# Describe failing pod for detailed error
+kubectl describe pod -n kube-system <pod-name>
+```
+
+Look for error messages like:
+
+- `Failed to pull image "mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-jammy": rpc error`
+- `manifest for mcr.microsoft.com/.../azurelustre-csi:v0.4.0-noble not found`
+
+**Possible Causes:**
+
+- Image tag doesn't exist for the specified OS flavor
+- Network connectivity problems to MCR (Microsoft Container Registry)
+- Incorrect image tag in DaemonSet specification
+- Registry authentication issues (For personal repositories during CSI testing/development)
+- Private registry configuration issues (For personal repositories during CSI testing/development)
+
+**Debugging Steps:**
+
+```sh
+# Verify image tags in DaemonSets
+kubectl get ds -n kube-system csi-azurelustre-node-jammy -o jsonpath='{.spec.template.spec.containers[?(@.name=="azurelustre")].image}'
+kubectl get ds -n kube-system csi-azurelustre-node-noble -o jsonpath='{.spec.template.spec.containers[?(@.name=="azurelustre")].image}'
+
+# Check image pull secrets
+kubectl get serviceaccount -n kube-system csi-azurelustre-node-sa -o yaml
+
+# Test image pull manually on a node
+kubectl debug node/<node-name> -it --image=ubuntu -- bash
+# Then inside the debug pod:
+# crictl pull mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-jammy
+```
+
+**Resolution:**
+
+1. **Verify image exists:**
+
+   ```sh
+   # Check available tags (requires docker or crane)
+   docker manifest inspect mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-jammy
+   ```
+
+2. **Use correct image tags:**
+
+   - Ensure DaemonSet manifests use existing image tags
+   - Verify `-jammy` and `-noble` suffixes match available images
+   - Update to a known working version if needed
+
+3. **Fix network/registry access:**
+
+   - Verify cluster can access mcr.microsoft.com
+   - Check firewall rules and network policies
+   - Verify no proxy configuration issues
+
+---
+
+### Inconsistent Driver Versions Across Nodes
+
+**Symptoms:**
+
+- Different CSI driver versions running on different nodes
+- Inconsistent behavior across the cluster
+- Some volumes mount successfully while others fail with different errors
+- Version mismatch warnings in logs
+
+**Check driver versions:**
+
+```sh
+# Check image versions across all CSI driver pods
+kubectl get pods -n kube-system -l app=csi-azurelustre-node -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.nodeName}{"\t"}{.spec.containers[?(@.name=="azurelustre")].image}{"\n"}{end}' | column -t
+
+# Check DaemonSet specifications
+kubectl get ds -n kube-system csi-azurelustre-node-jammy -o jsonpath='{.spec.template.spec.containers[?(@.name=="azurelustre")].image}'
+kubectl get ds -n kube-system csi-azurelustre-node-noble -o jsonpath='{.spec.template.spec.containers[?(@.name=="azurelustre")].image}'
+```
+
+**Possible Causes:**
+
+- DaemonSet update in progress (rolling update)
+- Different image tags configured for jammy vs noble DaemonSets
+- Failed DaemonSet updates leaving some pods on old versions
+- Manual pod restarts using different images
+
+**Debugging Steps:**
+
+```sh
+# Check DaemonSet rollout status
+kubectl rollout status ds/csi-azurelustre-node-jammy -n kube-system
+kubectl rollout status ds/csi-azurelustre-node-noble -n kube-system
+
+# Check for stuck rollouts
+kubectl get ds -n kube-system -l app=csi-azurelustre-node -o wide
+
+# Review DaemonSet update history
+kubectl rollout history ds/csi-azurelustre-node-jammy -n kube-system
+kubectl rollout history ds/csi-azurelustre-node-noble -n kube-system
+
+# Check pod ages to identify old pods
+kubectl get pods -n kube-system -l app=csi-azurelustre-node -o custom-columns=NAME:.metadata.name,AGE:.metadata.creationTimestamp,IMAGE:.spec.containers[0].image
+```
+
+**Resolution:**
+
+1. **Complete ongoing rollout:**
+
+   ```sh
+   # Wait for rollout to complete
+   kubectl rollout status ds/csi-azurelustre-node-jammy -n kube-system --timeout=10m
+   kubectl rollout status ds/csi-azurelustre-node-noble -n kube-system --timeout=10m
+   ```
+
+2. **Force pod recreation if stuck:**
+
+   ```sh
+   # Delete stuck pods to trigger recreation with new image
+   kubectl delete pod -n kube-system <stuck-pod-name>
+   ```
+
+3. **Align image versions:**
+
+   Ensure both DaemonSets use the same base version (only differing by OS suffix):
+   - Jammy: `v0.4.0-jammy`
+   - Noble: `v0.4.0-noble`
+
+   Both should share the same version number (`v0.4.0` in this example).
+
+4. **If upgrading from driver version < v0.4.0:**
+
+   Uninstall the old driver before deploying the new OS-specific DaemonSets:
+
+   ```sh
+   # Uninstall the previous driver version
+   ./deploy/uninstall-driver.sh
+
+   # Then install the new version with OS-specific DaemonSets
+   ./deploy/install-driver.sh
+   ```
+
+   Versions prior to v0.4.0 used a single DaemonSet which can cause version inconsistencies when mixing with the new OS-specific DaemonSets.
+
+5. **Verify update strategy:**
+
+   ```sh
+   # Check maxUnavailable setting
+   kubectl get ds -n kube-system csi-azurelustre-node-jammy -o jsonpath='{.spec.updateStrategy}'
+   ```
+
+   Should be:
+
+   ```yaml
+   rollingUpdate:
+     maxUnavailable: 1
+   type: RollingUpdate
+   ```
+
+---
+
+### DaemonSet Not Scheduling on New Nodes
+
+**Symptoms:**
+
+- Newly added nodes don't get CSI driver pods
+- Cluster scaling or node pool additions don't automatically deploy drivers
+- DaemonSet desired count doesn't increase with new nodes
+
+**Check DaemonSet coverage:**
+
+```sh
+# Compare node count vs DaemonSet pod count
+echo "Total nodes: $(kubectl get nodes --no-headers | wc -l)"
+echo "Jammy pods: $(kubectl get pods -n kube-system -l app=csi-azurelustre-node,flavor=jammy --no-headers | wc -l)"
+echo "Noble pods: $(kubectl get pods -n kube-system -l app=csi-azurelustre-node,flavor=noble --no-headers | wc -l)"
+
+# List nodes without CSI driver pods
+comm -23 \
+  <(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | sort) \
+  <(kubectl get pods -n kube-system -l app=csi-azurelustre-node -o jsonpath='{.items[*].spec.nodeName}' | tr ' ' '\n' | sort)
+
+# Check which nodes match DaemonSet selectors
+kubectl get nodes -l kubernetes.io/os=linux -o custom-columns=NAME:.metadata.name,OS-SKU:.metadata.labels.'kubernetes\.azure\.com/os-sku-effective'
+```
+
+**Possible Causes:**
+
+- New nodes have taints that DaemonSet doesn't tolerate
+- Node labels don't match any DaemonSet selector (wrong OS version)
+- DaemonSet update or creation failed
+- Resource constraints preventing pod scheduling
+
+**Debugging Steps:**
+
+```sh
+# Check node taints
+kubectl describe node <new-node-name> | grep -A5 Taints
+
+# Check DaemonSet tolerations
+kubectl get ds -n kube-system csi-azurelustre-node-jammy -o jsonpath='{.spec.template.spec.tolerations}'
+
+# Check for scheduling events
+kubectl get events -n kube-system --sort-by='.lastTimestamp' | grep -E "csi-azurelustre-node|<new-node-name>"
+
+# Verify DaemonSet controller is working
+kubectl logs -n kube-system -l component=kube-controller-manager | grep -i daemonset
+```
+
+**Resolution:**
+
+1. **Verify node labels:**
+
+   ```sh
+   # Ensure new node has required labels
+   kubectl label node <new-node-name> kubernetes.azure.com/os-sku-effective=Ubuntu2204
+   ```
+
+2. **Check DaemonSet health:**
+
+   ```sh
+   # Verify DaemonSets are active
+   kubectl get ds -n kube-system -l app=csi-azurelustre-node
+
+   # If DaemonSet is missing or corrupted, redeploy
+   kubectl apply -f deploy/csi-azurelustre-node-jammy.yaml
+   kubectl apply -f deploy/csi-azurelustre-node-noble.yaml
+   ```
+
+3. **Force pod creation if needed:**
+
+   ```sh
+   # Delete and recreate DaemonSet (last resort)
+   kubectl delete ds -n kube-system csi-azurelustre-node-jammy
+   kubectl apply -f deploy/csi-azurelustre-node-jammy.yaml
+   ```
 
 ---
 

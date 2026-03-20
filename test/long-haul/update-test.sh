@@ -35,7 +35,7 @@ function print_versions () {
 	controlPlaneUpgrades=$(az aks get-upgrades --resource-group $ResourceGroup --name $ClusterName)
 	currentControlPlaneK8sVersion=$(echo $controlPlaneUpgrades | jq -r '.controlPlaneProfile.kubernetesVersion')
 
-	podName=$(kubectl get pods -n kube-system -o wide --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp | grep csi-azurelustre-node | grep $PoolName | awk '{print $1}' | head -n 1)
+	podName=$(kubectl get pods -n kube-system -l app=csi-azurelustre-node -o wide --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp | grep $PoolName | awk '{print $1}' | head -n 1)
 	echo "Get kernel version and Lustre module version from pod $podName"
 	kernelVersion=$(kubectl exec -n kube-system -it $podName -c azurelustre -- /bin/bash -c "uname -r")
 	module=$(kubectl exec -n kube-system -it $podName -c azurelustre -- /bin/bash -c "dpkg-query -f '\${Package}|\${Version}' -W kmod-lustre-client-*")

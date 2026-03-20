@@ -49,7 +49,10 @@ func main() {
 			klog.Fatalln(err)
 		}
 		klog.V(2).Info(info)
-		fmt.Println(info) //nolint:forbidigo // Print version info to stdout for access through kubectl exec
+		_, err = fmt.Println(info) //nolint:forbidigo // Print version info to stdout for access through kubectl exec
+		if err != nil {
+			klog.Fatalln(err)
+		}
 		os.Exit(0)
 	}
 
