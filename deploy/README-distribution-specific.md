@@ -59,6 +59,6 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,OS-SKU:.metadata.labels.
 To check DaemonSet pod distribution:
 
 ```bash
-kubectl get pods -n kube-system -l app=csi-azurelustre-node -l flavor=jammy -o wide
-kubectl get pods -n kube-system -l app=csi-azurelustre-node -l flavor=noble -o wide
+kubectl get pods -n kube-system -l app=csi-azurelustre-node,flavor=jammy -o wide
+kubectl get pods -n kube-system -l app=csi-azurelustre-node,flavor=noble -o wide
 ```

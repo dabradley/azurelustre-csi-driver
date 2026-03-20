@@ -18,7 +18,7 @@ set -euo pipefail
 
 repo="$(git rev-parse --show-toplevel)/deploy"
 
-for i in $(kubectl get daemonsets.apps -n kube-system -o name | grep -F 'csi-azurelustre-node'); do
+for i in $(kubectl get daemonsets.apps -n kube-system -l app=csi-azurelustre-node -o name); do
   kubectl delete -n kube-system $i
 done
 
