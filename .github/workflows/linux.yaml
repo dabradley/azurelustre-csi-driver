@@ -42,7 +42,7 @@ jobs:
         make container
 
     - name: Install goveralls
-      run: go install github.com/mattn/goveralls@latest
+      run: go install github.com/mattn/goveralls@b03136803f261ccad7d5a40b19b25870a394578f  # v0.0.12
 
     - name: Get code coverage
       env:
