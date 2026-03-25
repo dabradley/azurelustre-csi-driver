@@ -89,6 +89,7 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | `controller.priorityClassName` | Controller pod priority class | `system-cluster-critical` |
 | `controller.extraArgs` | Extra args passed to controller driver | `["-v=5"]` |
 | `node.priorityClassName` | Node pod priority class | `system-node-critical` |
+| `node.updateStrategy.maxUnavailable` | Max node pods unavailable during a rolling update | `10%` |
 | `node.lustreClient.install` | Install Lustre client on nodes | `true` |
 | `node.jammy.lustreClient.version` | Lustre client version for jammy flavor | `2.15.8` |
 | `node.jammy.lustreClient.shaSuffix` | Lustre client SHA suffix for jammy flavor | `34-gc0f2040` |

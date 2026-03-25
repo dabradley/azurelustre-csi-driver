@@ -73,6 +73,8 @@ controller:
 node:
   tolerations:
     - operator: "Exists"
+  updateStrategy:
+    maxUnavailable: 10%
   priorityClassName: system-node-critical
   lustreClient:
     install: true
