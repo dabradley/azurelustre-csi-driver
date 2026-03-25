@@ -306,16 +306,21 @@ func (d *Driver) Run(endpoint string, testBool bool) {
 	}
 	klog.Infof("\nDRIVER INFORMATION:\n-------------------\n%s\n\nStreaming logs below:", versionMeta)
 
-	d.mounter = &mount.SafeFormatAndMount{
-		Interface: mount.New(""),
-		Exec:      utilexec.New(),
-	}
-	forceUnmounter, ok := d.mounter.Interface.(mount.MounterForceUnmounter)
-	if ok {
-		klog.V(4).Infof("Using force unmounter interface")
-		d.forceMounter = &forceUnmounter
-	} else {
-		klog.Fatalf("Mounter does not support force unmount")
+	// Only node pods mount filesystems. Constructing the host mounter runs a
+	// one-time umount capability probe that requires mount privileges, so set it
+	// up only for node pods (identified by a non-empty NodeID).
+	if d.NodeID != "" {
+		d.mounter = &mount.SafeFormatAndMount{
+			Interface: mount.New(""),
+			Exec:      utilexec.New(),
+		}
+		forceUnmounter, ok := d.mounter.Interface.(mount.MounterForceUnmounter)
+		if ok {
+			klog.V(4).Infof("Using force unmounter interface")
+			d.forceMounter = &forceUnmounter
+		} else {
+			klog.Fatalf("Mounter does not support force unmount")
+		}
 	}
 
 	// TODO_JUSJIN: revisit these caps
@@ -328,7 +333,6 @@ func (d *Driver) Run(endpoint string, testBool bool) {
 	d.removeNotReadyTaintIfNeeded()
 
 	s := NewNonBlockingGRPCServer()
-	// Driver d act as IdentityServer, ControllerServer and NodeServer
 	s.Start(endpoint, d, d, d, testBool)
 	s.Wait()
 }
