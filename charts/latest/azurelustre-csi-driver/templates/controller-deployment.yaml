@@ -77,6 +77,9 @@ spec:
                         - csi-azurelustre-controller
                 topologyKey: kubernetes.io/hostname
               weight: 5
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: csi-provisioner
           image: {{ .Values.sidecars.provisioner.repository }}:{{ .Values.sidecars.provisioner.tag }}
@@ -93,6 +96,11 @@ spec:
               name: socket-dir
           resources:
             {{- toYaml .Values.sidecars.provisioner.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
         - name: liveness-probe
           image: {{ .Values.sidecars.livenessProbe.repository }}:{{ .Values.sidecars.livenessProbe.tag }}
           args:
@@ -104,6 +112,11 @@ spec:
               mountPath: /csi
           resources:
             {{- toYaml .Values.sidecars.livenessProbe.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
         - name: azurelustre
           image: {{ .Values.image.repository }}:{{ .Values.image.tag }}-jammy
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -130,7 +143,10 @@ spec:
             - name: AZURELUSTRE_CSI_INSTALL_LUSTRE_CLIENT
               value: "no"
           securityContext:
-            privileged: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           volumeMounts:
             - mountPath: /csi
               name: socket-dir
