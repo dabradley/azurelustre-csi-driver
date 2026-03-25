@@ -11,7 +11,7 @@ metadata:
 spec:
   updateStrategy:
     rollingUpdate:
-      maxUnavailable: 1
+      maxUnavailable: {{ .Values.node.updateStrategy.maxUnavailable }}
     type: RollingUpdate
   selector:
     matchLabels:
