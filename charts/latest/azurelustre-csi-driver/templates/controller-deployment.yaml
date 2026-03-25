@@ -33,6 +33,21 @@ spec:
       priorityClassName: {{ .Values.controller.priorityClassName }}
       tolerations:
         {{- toYaml .Values.controller.tolerations | nindent 8 }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: type
+                    operator: NotIn
+                    values:
+                      - virtual-kubelet
+                  - key: kubernetes.azure.com/cluster
+                    operator: Exists
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
       containers:
         - name: csi-provisioner
           image: {{ .Values.sidecars.provisioner.repository }}:{{ .Values.sidecars.provisioner.tag }}
