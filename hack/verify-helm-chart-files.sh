@@ -72,6 +72,7 @@ declare -A CHARTS_FOR_DEPLOY_FILE=(
 ["deploy/csi-azurelustre-driver.yaml"]="templates/csidriver.yaml"
 ["deploy/rbac-csi-azurelustre-controller.yaml"]="templates/controller-serviceaccount.yaml templates/controller-clusterrole.yaml templates/controller-clusterrolebinding.yaml templates/controller-secret-clusterrole.yaml templates/controller-secret-clusterrolebinding.yaml"
 ["deploy/rbac-csi-azurelustre-node.yaml"]="templates/node-serviceaccount.yaml templates/node-secret-clusterrole.yaml templates/node-secret-clusterrolebinding.yaml"
+["deploy/pdb-csi-azurelustre-controller.yaml"]="templates/controller-pdb.yaml"
 )
 
 # Populate per-flavor node DaemonSet entries from the Makefile flavor list.
