@@ -3,9 +3,9 @@ entries:
   azurelustre-csi-driver:
   - apiVersion: v2
     appVersion: latest
-    created: "2026-07-01T15:48:19.925491887-04:00"
+    created: "2026-07-01T15:59:38.774980197-04:00"
     description: Azure Lustre CSI Driver Helm chart
-    digest: 2d1601c67559ed28e4508992f1d648723eef0dc14548865ec98006661784c2a2
+    digest: 9a2ffc9a7905680330dd8e4e38f157520d9ade8821739903b47a5188c15a8f33
     home: https://github.com/kubernetes-sigs/azurelustre-csi-driver
     keywords:
     - storage
@@ -18,4 +18,4 @@ entries:
     urls:
     - https://raw.githubusercontent.com/kubernetes-sigs/azurelustre-csi-driver/main/charts/latest/azurelustre-csi-driver-v0.0.0.tgz
     version: v0.0.0
-generated: "2026-07-01T15:48:19.924583849-04:00"
+generated: "2026-07-01T15:59:38.773533573-04:00"

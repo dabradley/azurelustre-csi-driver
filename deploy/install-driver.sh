@@ -121,6 +121,12 @@ kubectl delete -n kube-system deployment csi-azurelustre-controller --ignore-not
 kubectl delete -n kube-system daemonset csi-azurelustre-node --ignore-not-found
 kubectl delete clusterrolebinding azurelustre-csi-provisioner-binding --ignore-not-found
 kubectl delete clusterrole azurelustre-external-provisioner-role --ignore-not-found
+# Remove legacy secret RBAC (renamed without the -secret suffix after v0.4.0) so
+# in-place upgrades revoke the unused secrets grants instead of leaving them behind.
+kubectl delete clusterrole csi-azurelustre-controller-secret-role --ignore-not-found
+kubectl delete clusterrolebinding csi-azurelustre-controller-secret-binding --ignore-not-found
+kubectl delete clusterrole csi-azurelustre-node-secret-role --ignore-not-found
+kubectl delete clusterrolebinding csi-azurelustre-node-secret-binding --ignore-not-found
 
 kubectl apply -f "${repo}/rbac-csi-azurelustre-controller.yaml"
 kubectl apply -f "${repo}/rbac-csi-azurelustre-node.yaml"
