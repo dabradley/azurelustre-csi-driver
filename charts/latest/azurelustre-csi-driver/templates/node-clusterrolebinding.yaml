@@ -2,7 +2,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "azurelustre.fullname" . }}-node-secret-binding
+  name: {{ include "azurelustre.fullname" . }}-node-binding
   labels:
     {{- include "azurelustre.labels" . | nindent 4 }}
 subjects:
@@ -11,6 +11,6 @@ subjects:
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: {{ include "azurelustre.fullname" . }}-node-secret-role
+  name: {{ include "azurelustre.fullname" . }}-node-role
   apiGroup: rbac.authorization.k8s.io
 {{- end }}
