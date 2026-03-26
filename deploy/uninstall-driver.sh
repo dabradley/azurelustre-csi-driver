@@ -32,4 +32,15 @@ kubectl delete -f "${repo}"/csi-azurelustre-driver.yaml --ignore-not-found
 kubectl delete -f "${repo}"/rbac-csi-azurelustre-controller.yaml --ignore-not-found
 kubectl delete -f "${repo}"/rbac-csi-azurelustre-node.yaml --ignore-not-found
 kubectl delete configmap csi-azurelustre-entrypoint -n kube-system --ignore-not-found
+
+# Clean up legacy RBAC resources from older installs.
+# Controller provisioner role/binding were renamed (added csi- prefix) after v0.4.0.
+kubectl delete clusterrole azurelustre-external-provisioner-role --ignore-not-found
+kubectl delete clusterrolebinding azurelustre-csi-provisioner-binding --ignore-not-found
+# Secret RBAC resources were removed after v0.4.0.
+kubectl delete clusterrole csi-azurelustre-controller-secret-role --ignore-not-found
+kubectl delete clusterrolebinding csi-azurelustre-controller-secret-binding --ignore-not-found
+kubectl delete clusterrole csi-azurelustre-node-secret-role --ignore-not-found
+kubectl delete clusterrolebinding csi-azurelustre-node-secret-binding --ignore-not-found
+
 echo 'Uninstalled Azure Lustre CSI driver successfully.'
