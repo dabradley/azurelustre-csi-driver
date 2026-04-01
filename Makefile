@@ -194,18 +194,6 @@ build-push-latest: container push-latest
 .PHONY: build-push-quick-latest
 build-push-quick-latest: quickcontainer push-latest
 
-#
-# IOR: docker build & publish
-#
-.PHONY: ior
-ior:
-	docker build -t $(REGISTRY)/ior:latest --output=type=docker -f ./test/ior/Dockerfile .
-	# docker build -t $(REGISTRY)/ior:latest -f ./test/ior/Dockerfile .
-
-.PHONY: push-ior
-push-ior:
-	docker push $(REGISTRY)/ior:latest
-
 .PHONY: clean
 clean:
 	go clean -r -x
