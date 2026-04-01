@@ -32,6 +32,7 @@ CGO_ENABLED ?= 1
 export GOPATH GOBIN GO111MODULE CGO_ENABLED
 
 ARCH ?= amd64
+FLAVORS := jammy noble
 
 all: azurelustre
 
@@ -80,42 +81,37 @@ azurelustre-dalec:
 #
 # Azure Lustre: Docker build
 #
+.PHONY: docker-build
+docker-build:
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
 .PHONY: quickcontainer
-quickcontainer: quicklustre
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
+quickcontainer: quicklustre docker-build
 .PHONY: container
-container: azurelustre
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
+container: azurelustre docker-build
 
 #
 # Azure Lustre: Docker tag & push
 #
 .PHONY: push
 push:
-	docker push $(IMAGE_TAG)-jammy
-	docker push $(IMAGE_TAG)-noble
+	$(foreach f,$(FLAVORS),docker push $(IMAGE_TAG)-$(f);)
 
 .PHONY: tag-latest
 tag-latest:
-	docker tag $(IMAGE_TAG)-jammy $(IMAGE_TAG_LATEST)-jammy
-	docker tag $(IMAGE_TAG)-noble $(IMAGE_TAG_LATEST)-noble
+	$(foreach f,$(FLAVORS),docker tag $(IMAGE_TAG)-$(f) $(IMAGE_TAG_LATEST)-$(f);)
 
 .PHONY: push-latest
 push-latest: tag-latest
-	docker push $(IMAGE_TAG_LATEST)-jammy
-	docker push $(IMAGE_TAG_LATEST)-noble
+	$(foreach f,$(FLAVORS),docker push $(IMAGE_TAG_LATEST)-$(f);)
 
 .PHONY: tag-commit
 tag-commit: tag-latest
-	docker tag $(IMAGE_TAG_LATEST)-jammy $(IMAGE_TAG_COMMIT)-jammy
-	docker tag $(IMAGE_TAG_LATEST)-noble $(IMAGE_TAG_COMMIT)-noble
+	$(foreach f,$(FLAVORS),docker tag $(IMAGE_TAG_LATEST)-$(f) $(IMAGE_TAG_COMMIT)-$(f);)
 
 .PHONY: push-commit
 push-commit: tag-commit
-	docker push $(IMAGE_TAG_COMMIT)-jammy
-	docker push $(IMAGE_TAG_COMMIT)-noble
+	$(foreach f,$(FLAVORS),docker push $(IMAGE_TAG_COMMIT)-$(f);)
 
 .PHONY: build-push
 build-push: container push
