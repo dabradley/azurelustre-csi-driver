@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/azurelustre-csi-driver/pkg/util"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader"
 	azure "sigs.k8s.io/cloud-provider-azure/pkg/provider"
+	azureconfig "sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
 )
 
 const (
@@ -190,7 +191,7 @@ func NewDriver(options *DriverOptions) *Driver {
 		klog.V(2).Infof("use default %s env var: %v", DefaultAzureConfigFileEnv, credFile)
 	}
 
-	config, err := configloader.Load[azure.Config](ctx, nil, &configloader.FileLoaderConfig{
+	config, err := configloader.Load[azureconfig.Config](ctx, nil, &configloader.FileLoaderConfig{
 		FilePath: credFile,
 	})
 	if err != nil {
@@ -210,7 +211,10 @@ func NewDriver(options *DriverOptions) *Driver {
 		if clientID := os.Getenv("AZURE_CLIENT_ID"); clientID != "" {
 			config.AADClientID = clientID
 		} else if config.UseManagedIdentityExtension && config.UserAssignedIdentityID != "" {
-			os.Setenv("AZURE_CLIENT_ID", config.UserAssignedIdentityID)
+			err = os.Setenv("AZURE_CLIENT_ID", config.UserAssignedIdentityID)
+			if err != nil {
+				klog.Warningf("failed to set AZURE_CLIENT_ID env var: %v", err)
+			}
 			config.AADClientID = config.UserAssignedIdentityID
 		}
 		if err = az.InitializeCloudFromConfig(ctx, config, false, false); err != nil {
@@ -317,13 +321,7 @@ func (d *Driver) Run(endpoint string, testBool bool) {
 	d.AddVolumeCapabilityAccessModes(volumeCapabilities)
 	d.AddNodeServiceCapabilities(nodeServiceCapabilities)
 
-	// Remove taint from node to indicate driver startup success
-	// This is done at the last possible moment to prevent race conditions or false positive removals
-	if d.kubeClient != nil && d.removeNotReadyTaint && d.NodeID != "" {
-		time.AfterFunc(d.taintRemovalInitialDelay, func() {
-			removeTaintInBackground(d.kubeClient, d.NodeID, d.Name, d.taintRemovalBackoff, removeNotReadyTaint)
-		})
-	}
+	d.removeNotReadyTaintIfNeeded()
 
 	s := csicommon.NewNonBlockingGRPCServer()
 	// Driver d act as IdentityServer, ControllerServer and NodeServer
@@ -382,8 +380,17 @@ type JSONPatch struct {
 	Value interface{} `json:"value,omitempty"`
 }
 
+func (d *Driver) removeNotReadyTaintIfNeeded() {
+	// Remove taint from node to indicate driver startup success
+	// This is done at the last possible moment to prevent race conditions or false positive removals
+	if d.kubeClient != nil && d.removeNotReadyTaint && d.NodeID != "" {
+		time.AfterFunc(d.taintRemovalInitialDelay, func() {
+			removeTaintInBackground(d.kubeClient, d.NodeID, d.Name, d.taintRemovalBackoff, removeNotReadyTaint)
+		})
+	}
+}
+
 // removeTaintInBackground removes the taint from the node in a goroutine with retry logic
-// TODO: We could test this properly with synctest when we move to go 1.25
 func removeTaintInBackground(k8sClient kubernetes.Interface, nodeName, driverName string, backoff wait.Backoff, removalFunc func(kubernetes.Interface, string, string) error) {
 	klog.V(2).Infof("starting background node taint removal for node %s", nodeName)
 	go func() {

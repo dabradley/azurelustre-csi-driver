@@ -17,6 +17,7 @@ limitations under the License.
 package csicommon
 
 import (
+	"context"
 	"net"
 	"os"
 	"sync"
@@ -79,7 +80,8 @@ func (s *nonBlockingGRPCServer) serve(endpoint string, ids csi.IdentityServer, c
 		}
 	}
 
-	listener, err := net.Listen(proto, addr)
+	lc := &net.ListenConfig{}
+	listener, err := lc.Listen(context.Background(), proto, addr)
 	if err != nil {
 		klog.Fatalf("Failed to listen: %v", err)
 	}

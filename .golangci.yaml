@@ -1,57 +1,100 @@
+version: "2"
 linters:
-  presets:
-    - bugs
   enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
     - containedctx
+    - contextcheck
     - copyloopvar
     - decorder
     - dupl
+    - durationcheck
+    - errchkjson
+    - errorlint
+    - exhaustive
     - forbidigo
     - forcetypeassert
-    - gci
-    - gofmt
-    - gofumpt
-    - goimports
-    - gosimple
+    - gocheckcompilerdirectives
+    - gochecksumtype
+    - gosec
+    - gosmopolitan
     - grouper
     - inamedparam
-    - ineffassign
+    - loggercheck
+    - makezero
     - misspell
+    - musttag
+    - nilerr
+    - nilnesserr
+    - noctx
     - nolintlint
     - nonamedreturns
     - nosprintfhostport
     - predeclared
+    - protogetter
+    - reassign
+    - recvcheck
     - revive
-    - stylecheck
+    - rowserrcheck
+    - spancheck
+    - sqlclosecheck
+    - staticcheck
     - tagalign
-    - tenv
+    - testifylint
     - unconvert
-    - unused
     - usestdlibvars
     - wastedassign
     - whitespace
-linters-settings:
-  copyloopvar:
-    check-alias: true
-  errcheck:
-    check-blank: true
-    check-type-assertions: true
-    disable-default-exclusions: true
-  gofumpt:
-    extra-rules: true
-  grouper:
-    const-require-grouping: true
-    const-require-single-const: true
-    import-require-grouping: false
-    import-require-single-import: true
-    type-require-grouping: false
-    type-require-single-type: false
-    var-require-grouping: false
-    var-require-single-var: true
-  nolintlint:
-    require-explanation: true
-    require-specific: true
-  unparam:
-    check-exported: true
-run:
-  timeout: 30m
+    - zerologlint
+  settings:
+    copyloopvar:
+      check-alias: true
+    errcheck:
+      disable-default-exclusions: true
+      check-type-assertions: true
+      check-blank: true
+    grouper:
+      const-require-single-const: true
+      const-require-grouping: true
+      import-require-single-import: true
+      import-require-grouping: false
+      type-require-single-type: false
+      type-require-grouping: false
+      var-require-single-var: true
+      var-require-grouping: false
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    unparam:
+      check-exported: true
+  exclusions:
+    presets:
+      - comments
+      #- common-false-positives
+      #- legacy
+      #- std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+    rules:
+      - linters:
+          - revive
+        path: 'util/*'
+        text: 'var-naming: avoid meaningless package names'
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra-rules: true
+  exclusions:
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

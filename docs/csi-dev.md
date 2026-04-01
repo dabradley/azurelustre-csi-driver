@@ -16,7 +16,7 @@ $ git clone https://github.com/kubernetes-sigs/azurelustre-csi-driver $GOPATH/sr
 &nbsp;
 
 - Build azurelustre Storage CSI driver
-  
+
 ```console
 $ cd $GOPATH/src/sigs.k8s.io/azurelustre-csi-driver
 $ make azurelustre
@@ -32,11 +32,10 @@ $ make verify
 
 &nbsp;
 
-- Build container image and push to dockerhub
+- Build container image and push to ACR
 
 ```console
-$ export REGISTRY_NAME=<dockerhub-alias>
-$ make push-latest
+$ REGISTRY="<acr-name>.azurecr.io" make build-push-latest
 ```
 
 &nbsp;

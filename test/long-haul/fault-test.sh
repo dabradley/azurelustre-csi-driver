@@ -47,7 +47,7 @@ workloadNodeName=$workloadNodeNameNew
 
 
 print_logs_title "Add label for worker nodes"
-kubectl get nodes --no-headers | awk '{print $1}' | 
+kubectl get nodes --no-headers | awk '{print $1}' |
 {
     while read n;
     do
@@ -63,7 +63,18 @@ kubectl get nodes --no-headers | awk '{print $1}' |
 
 
 print_logs_title "Remove Lustre CSI node pod"
-kubectl patch daemonset $NodePodNameKeyword -n kube-system -p '{"spec": {"template": {"spec": {"nodeSelector": {"node4faulttest": "false"}}}}}'
+# Find which daemonset is running on the workload node
+podOnNode=$(kubectl get po -n kube-system -o wide -l app=csi-azurelustre-node | grep "${workloadNodeName}" | awk '{print $1}' | head -n 1)
+if [[ -z "${podOnNode}" ]]; then
+    print_logs_error "Could not find CSI node pod on ${workloadNodeName}"
+    fast_exit
+fi
+# Get the daemonset name from the pod
+daemonsetName=$(kubectl get po -n kube-system "${podOnNode}" -o jsonpath='{.metadata.ownerReferences[0].name}')
+print_logs_info "Found daemonset ${daemonsetName} managing pod on ${workloadNodeName}"
+
+# Patch the specific daemonset
+kubectl patch daemonset "${daemonsetName}" -n kube-system -p '{"spec": {"template": {"spec": {"nodeSelector": {"node4faulttest": "false"}}}}}'
 sleep $SleepInSecs
 
 
