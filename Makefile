@@ -15,8 +15,7 @@
 PKG = sigs.k8s.io/azurelustre-csi-driver
 GIT_COMMIT ?= $(shell git rev-parse HEAD)
 REGISTRY ?= azurelustre.azurecr.io
-TARGET ?= csi
-IMAGE_NAME ?= azurelustre-$(TARGET)
+IMAGE_NAME = azurelustre-csi
 IMAGE_VERSION ?= latest
 IMAGE_TAG ?= $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_VERSION)
 LATEST_TAG ?= latest
@@ -33,14 +32,6 @@ CGO_ENABLED ?= 1
 export GOPATH GOBIN GO111MODULE CGO_ENABLED
 
 ARCH ?= amd64
-
-ifeq ($(TARGET), csi)
-build_lustre_source_code = azurelustre
-dockerfile = ./pkg/azurelustreplugin/Dockerfile
-else
-build_lustre_source_code = $()
-dockerfile = ./pkg/driverinstaller/Dockerfile_$(TARGET)
-endif
 
 all: azurelustre
 
@@ -91,12 +82,12 @@ azurelustre-dalec:
 #
 .PHONY: quickcontainer
 quickcontainer: quicklustre
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f $(dockerfile) .
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f $(dockerfile) .
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
 .PHONY: container
-container: $(build_lustre_source_code)
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f $(dockerfile) .
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f $(dockerfile) .
+container: azurelustre
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
 
 #
 # Azure Lustre: Docker tag & push
