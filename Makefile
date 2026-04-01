@@ -166,3 +166,4 @@ build-push-quick-latest: quickcontainer push-latest
 clean:
 	go clean -r -x
 	-rm -rf _output
+	-rm -f profile.cov
