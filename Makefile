@@ -33,11 +33,6 @@ CGO_ENABLED ?= 1
 export GOPATH GOBIN GO111MODULE CGO_ENABLED
 
 ARCH ?= amd64
-# Output type of docker buildx build
-OUTPUT_TYPE ?= registry
-
-ALL_ARCH.linux = amd64 #arm64
-ALL_OS_ARCH = $(foreach arch, ${ALL_ARCH.linux}, linux-$(arch))
 
 ifeq ($(TARGET), csi)
 build_lustre_source_code = azurelustre
@@ -96,51 +91,23 @@ azurelustre-dalec:
 #
 .PHONY: quickcontainer
 quickcontainer: quicklustre
-	docker build -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f $(dockerfile) .
-	docker build -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f $(dockerfile) .
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f $(dockerfile) .
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f $(dockerfile) .
 .PHONY: container
 container: $(build_lustre_source_code)
-	docker build -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f $(dockerfile) .
-	docker build -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f $(dockerfile) .
-
-.PHONY: container-linux
-container-linux:
-	docker buildx build --pull --output=type=$(OUTPUT_TYPE) --platform="linux/$(ARCH)" \
-		-t $(IMAGE_TAG)-linux-$(ARCH) --build-arg ARCH=$(ARCH) -f $(dockerfile) .
-
-.PHONY: azurelustre-container
-azurelustre-container:
-	docker buildx rm container-builder || true
-	docker buildx create --use --name=container-builder
-
-	# enable qemu for arm64 build
-	# docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-	for arch in $(ALL_ARCH.linux); do \
-		ARCH=$${arch} $(MAKE) azurelustre; \
-		ARCH=$${arch} $(MAKE) container-linux; \
-	done
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f $(dockerfile) .
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f $(dockerfile) .
 
 #
 # Azure Lustre: Docker tag & push
 #
 .PHONY: push
 push:
-ifdef CI
-	docker manifest create --amend $(IMAGE_TAG) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
-	docker manifest push --purge $(IMAGE_TAG)
-	docker manifest inspect $(IMAGE_TAG)
-else
 	docker push $(IMAGE_TAG)-jammy
 	docker push $(IMAGE_TAG)-noble
-endif
 
 .PHONY: tag-latest
 tag-latest:
-ifdef CI
-	docker manifest create --amend $(IMAGE_TAG_LATEST) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
-	docker manifest push --purge $(IMAGE_TAG_LATEST)
-	docker manifest inspect $(IMAGE_TAG_LATEST)
-else
 	docker tag $(IMAGE_TAG)-jammy $(IMAGE_TAG_LATEST)-jammy
 	docker tag $(IMAGE_TAG)-noble $(IMAGE_TAG_LATEST)-noble
 
@@ -148,15 +115,9 @@ else
 push-latest: tag-latest
 	docker push $(IMAGE_TAG_LATEST)-jammy
 	docker push $(IMAGE_TAG_LATEST)-noble
-endif
 
 .PHONY: tag-commit
 tag-commit: tag-latest
-ifdef CI
-	docker manifest create --amend $(IMAGE_TAG_COMMIT) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
-	docker manifest push --purge $(IMAGE_TAG_COMMIT)
-	docker manifest inspect $(IMAGE_TAG_COMMIT)
-else
 	docker tag $(IMAGE_TAG_LATEST)-jammy $(IMAGE_TAG_COMMIT)-jammy
 	docker tag $(IMAGE_TAG_LATEST)-noble $(IMAGE_TAG_COMMIT)-noble
 
@@ -164,7 +125,6 @@ else
 push-commit: tag-commit
 	docker push $(IMAGE_TAG_COMMIT)-jammy
 	docker push $(IMAGE_TAG_COMMIT)-noble
-endif
 
 .PHONY: build-push
 build-push: container push
