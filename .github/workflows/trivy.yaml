@@ -36,10 +36,8 @@ jobs:
 
       - name: Build an image from Dockerfile
         run: |
-          export PUBLISH=true
           export REGISTRY=test
           export IMAGE_VERSION=latest
-          export DOCKER_CLI_EXPERIMENTAL=enabled
           make container
 
       - name: Run Trivy vulnerability scanner

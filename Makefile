@@ -15,36 +15,20 @@
 PKG = sigs.k8s.io/azurelustre-csi-driver
 GIT_COMMIT ?= $(shell git rev-parse HEAD)
 REGISTRY ?= azurelustre.azurecr.io
-REGISTRY_NAME ?= $(shell echo $(REGISTRY) | sed "s/.azurecr.io//g")
 TARGET ?= csi
 IMAGE_NAME ?= azurelustre-$(TARGET)
 IMAGE_VERSION ?= latest
-CLOUD ?= AzurePublicCloud
-# Use a custom version for E2E tests if we are in Prow
-ifdef CI
-ifndef PUBLISH
-override IMAGE_VERSION := e2e-$(GIT_COMMIT)
-endif
-endif
 IMAGE_TAG ?= $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_VERSION)
 IMAGE_TAG_LATEST = $(REGISTRY)/$(IMAGE_NAME):latest
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS ?= "-X ${PKG}/pkg/azurelustre.driverVersion=${IMAGE_VERSION} -X ${PKG}/pkg/azurelustre.gitCommit=${GIT_COMMIT} -X ${PKG}/pkg/azurelustre.buildDate=${BUILD_DATE} -s -w -extldflags '-static'"
-E2E_HELM_OPTIONS ?= --set image.azurelustre.pullPolicy=Always --set image.azurelustre.repository=$(REGISTRY)/$(IMAGE_NAME) --set image.azurelustre.tag=$(IMAGE_VERSION) --set driver.userAgentSuffix="e2e-test"
-ifdef ENABLE_AZURELUSTRE
-override E2E_HELM_OPTIONS := $(E2E_HELM_OPTIONS) --set controller.logLevel=6 --set node.logLevel=6
-endif
-E2E_HELM_OPTIONS += ${EXTRA_HELM_OPTIONS}
 GINKGO_FLAGS = -ginkgo.v
 GO111MODULE = on
 GOPATH ?= $(shell go env GOPATH)
 GOBIN ?= $(GOPATH)/bin
 CGO_ENABLED ?= 1
-DOCKER_CLI_EXPERIMENTAL = enabled
-export GOPATH GOBIN GO111MODULE DOCKER_CLI_EXPERIMENTAL CGO_ENABLED
+export GOPATH GOBIN GO111MODULE CGO_ENABLED
 
-# The current context of image building
-# The architecture of the image
 ARCH ?= amd64
 # Output type of docker buildx build
 OUTPUT_TYPE ?= registry
@@ -88,24 +72,6 @@ e2e-test:
 	else \
 		go test -v -timeout=0 ./test/e2e ${GINKGO_FLAGS};\
 	fi
-
-.PHONY: e2e-bootstrap
-e2e-bootstrap: install-helm
-	# Only build and push the image if it does not exist in the registry
-	docker pull $(IMAGE_TAG) || make azurelustre-container push
-	helm install azurelustre-csi-driver ./charts/latest/azurelustre-csi-driver --namespace kube-system --wait --timeout=15m -v=5 --debug \
-		--set controller.runOnMaster=true \
-		--set controller.replicas=1 \
-		--set cloud=$(CLOUD) \
-		$(E2E_HELM_OPTIONS)
-
-.PHONY: install-helm
-install-helm:
-	curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
-
-.PHONY: e2e-teardown
-e2e-teardown:
-	helm delete azurelustre-csi-driver --namespace kube-system
 
 #
 # Azure Lustre: Code build
