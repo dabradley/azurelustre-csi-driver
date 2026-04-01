@@ -33,6 +33,13 @@ export GOPATH GOBIN GO111MODULE CGO_ENABLED
 
 ARCH ?= amd64
 
+# Cross-compilation: set the C compiler for arm64 builds so CGO_ENABLED=1
+# works on amd64 hosts (required for GOEXPERIMENT=systemcrypto / FIPS).
+ifeq ($(ARCH),arm64)
+  CC := aarch64-linux-gnu-gcc
+  export CC
+endif
+
 all: azurelustre
 
 #
@@ -80,42 +87,65 @@ azurelustre-dalec:
 #
 # Azure Lustre: Docker build
 #
+# Jammy is amd64-only. Noble supports amd64 and arm64.
+.PHONY: docker-build
+docker-build:
+ifeq ($(ARCH),amd64)
+	docker build --platform=linux/amd64 -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
+endif
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
 .PHONY: quickcontainer
-quickcontainer: quicklustre
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
+quickcontainer: quicklustre docker-build
 .PHONY: container
-container: azurelustre
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-jammy --build-arg srcImage=ubuntu:22.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-noble --build-arg srcImage=ubuntu:24.04 --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
+container: azurelustre docker-build
 
 #
 # Azure Lustre: Docker tag & push
 #
 .PHONY: push
 push:
+ifeq ($(ARCH),amd64)
 	docker push $(IMAGE_TAG)-jammy
+endif
 	docker push $(IMAGE_TAG)-noble
 
 .PHONY: tag-latest
 tag-latest:
+ifeq ($(ARCH),amd64)
 	docker tag $(IMAGE_TAG)-jammy $(IMAGE_TAG_LATEST)-jammy
+endif
 	docker tag $(IMAGE_TAG)-noble $(IMAGE_TAG_LATEST)-noble
 
 .PHONY: push-latest
 push-latest: tag-latest
+ifeq ($(ARCH),amd64)
 	docker push $(IMAGE_TAG_LATEST)-jammy
+endif
 	docker push $(IMAGE_TAG_LATEST)-noble
 
 .PHONY: tag-commit
 tag-commit: tag-latest
+ifeq ($(ARCH),amd64)
 	docker tag $(IMAGE_TAG_LATEST)-jammy $(IMAGE_TAG_COMMIT)-jammy
+endif
 	docker tag $(IMAGE_TAG_LATEST)-noble $(IMAGE_TAG_COMMIT)-noble
 
 .PHONY: push-commit
 push-commit: tag-commit
+ifeq ($(ARCH),amd64)
 	docker push $(IMAGE_TAG_COMMIT)-jammy
+endif
 	docker push $(IMAGE_TAG_COMMIT)-noble
+
+# Print the list of image flavors built for the current ARCH.
+# Used by CI pipelines to discover flavors without parsing Makefile variables.
+.PHONY: print-flavors
+print-flavors:
+ifeq ($(ARCH),amd64)
+	@echo jammy noble
+else
+	@echo noble
+endif
 
 .PHONY: build-push
 build-push: container push

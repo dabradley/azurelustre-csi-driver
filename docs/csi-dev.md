@@ -56,6 +56,14 @@ $ REGISTRY="<alias>csiacr.azurecr.io" make build-push-latest
 This pushes flavor-suffixed tags (e.g., `latest-jammy`, `latest-noble`), not just an
 unsuffixed `:latest`.
 
+To build for ARM64 (noble only — jammy doesn't support ARM64):
+
+```console
+$ sudo apt install gcc-aarch64-linux-gnu                         # one-time: install cross-compiler
+$ docker run --privileged --rm tonistiigi/binfmt --install arm64 # one-time: enable arm64 emulation for Docker
+$ REGISTRY="<alias>csiacr.azurecr.io" make build-push-latest ARCH=arm64
+```
+
 > **Note:** The `azurelustre-csi-integration` repository on team ACRs (e.g.,
 > `tip5csiacr`) is reserved for CI builds. Don't push to it manually.
 
