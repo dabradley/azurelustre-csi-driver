@@ -98,6 +98,44 @@ Production images are built through DALEC (see below).
 
 &nbsp;
 
+- Run the Kubernetes external storage e2e tests
+
+The `e2e-test` target installs the driver from the local Helm chart, runs the
+e2e test suite, and cleans up afterwards. You need a running cluster with
+`kubectl` configured and a Lustre filesystem accessible from the cluster:
+
+```sh
+make e2e-test LUSTRE_FS_NAME=<fs-name> LUSTRE_MGS_IP=<mgs-ip>
+```
+
+Or run the script directly for more options (custom image, skip install/cleanup, etc.):
+
+```sh
+hack/e2e-test.sh --lustre-fs-name <fs-name> --lustre-mgs-ip <mgs-ip> --help
+```
+
+- Run unit tests
+
+`make verify` runs linters, vet, and unit tests together. If you only want to
+run the unit tests (e.g., iterating on a specific test without waiting for
+linters), run them directly:
+
+```sh
+make unit-test
+```
+
+- Test locally without Lustre hardware or Azure credentials
+
+The sanity test suite exercises the CSI driver's gRPC endpoints with both
+mock-mount and mock-dynamic-provisioning enabled, so it requires neither a
+real Lustre filesystem nor an `azure.json` credential file:
+
+```sh
+make sanity-test-local
+```
+
+This is the fastest way to validate driver behavior during development.
+
 ## DALEC image builds
 
 Production images are built through [DALEC](https://github.com/Azure/dalec-build-defs),
