@@ -1,4 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# Copyright 2024 The Kubernetes Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 set -euox pipefail
 
@@ -20,10 +34,24 @@ envsubst < integration_dalec_aks.yaml.template | kubectl apply -f -
 
 # Now running - wait for completion!
 pod=azurelustre-integration-dalec
-kubectl wait --for=condition=Ready pod/${pod} --timeout=300s
-kubectl wait --for=condition=Ready=false pod/${pod} --timeout=300s
-# Grab Result.
-result=$(kubectl get pod ${pod} -o=jsonpath='{.status.containerStatuses[*].state.*.exitCode}')
-kubectl logs ${pod}
+kubectl wait --for=condition=Ready "pod/${pod}" --timeout=300s
+kubectl wait --for=condition=Ready=false "pod/${pod}" --timeout=300s
+# Grab Result. Filter by container name so a future sidecar injection (logging,
+# service mesh, etc.) doesn't make the jsonpath return multiple exit codes and
+# break `exit "${result}"` with "numeric argument required".
+result=$(kubectl get pod "${pod}" -o=jsonpath="{.status.containerStatuses[?(@.name==\"${pod}\")].state.terminated.exitCode}")
+kubectl logs "${pod}"
 echo "Result: ${result}"
-exit ${result}
+
+# Validate result is a non-empty integer before exiting. An empty or non-numeric
+# value (container never terminated, name mismatch, jsonpath miss) would cause
+# `exit ""` to fail with "numeric argument required" and leave no clear signal.
+# Allow negatives because Kubernetes types exitCode as int32 (containerd/CRI-O
+# normally report 0-255, but be permissive).
+if [[ ! "${result}" =~ ^-?[0-9]+$ ]]; then
+  echo "ERROR: integration test container did not produce a valid exit code." >&2
+  echo "Dumping pod state for debugging:" >&2
+  kubectl get pod "${pod}" -o yaml >&2 || true
+  exit 1
+fi
+exit "${result}"
