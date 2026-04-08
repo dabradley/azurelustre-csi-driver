@@ -81,10 +81,6 @@ sanity-test: azurelustre
 sanity-test-local:
 	go test -v -timeout=30m ./test/sanity_local -ginkgo.skip="should fail when requesting to create a volume with already existing name and different capacity|should fail when the requested volume does not exist"
 
-.PHONY: integration-test
-integration-test: azurelustre
-	go test -v -timeout=30m ./test/integration
-
 .PHONY: e2e-test
 e2e-test:
 	if [ ! -z "$(EXTERNAL_E2E_TEST_AZURELUSTRE)" ]; then \
