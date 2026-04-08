@@ -28,10 +28,11 @@ cd "${ROOT}"
 TMP_DIR=$(mktemp -d)
 
 # cleanup
-exitHandler() (
+# shellcheck disable=SC2317 # exitHandler is invoked via trap EXIT, not called directly
+exitHandler() {
   echo "Cleaning up..."
   rm -rf "${TMP_DIR}"
-)
+}
 trap exitHandler EXIT
 
 if [[ -z "$(command -v misspell)" ]]; then
