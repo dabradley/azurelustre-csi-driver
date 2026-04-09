@@ -104,3 +104,39 @@ The startup taint functionality is enabled by default but can be configured duri
 - **Disable Taint Removal**: To disable, set `--remove-not-ready-taint=false` in the driver deployment
 
 For most AKS users, the default behavior provides optimal pod scheduling and should not be changed
+
+## Custom Entrypoint (Advanced)
+
+The CSI driver supports overriding the built-in entrypoint script via a Kubernetes ConfigMap. This is intended as a **troubleshooting/debugging feature** for use when suggested by Microsoft support, or for customers with custom initialization requirements (e.g., non-standard networking setups).
+
+### How It Works
+
+The container uses a wrapper script (`start.sh`) that checks for a custom entrypoint at `/app/custom-entrypoint/entrypoint.sh`. If found, it runs the custom version; otherwise it falls back to the built-in entrypoint. The custom entrypoint is mounted from an optional ConfigMap (`csi-azurelustre-entrypoint`) into the **node DaemonSet pods only** — the controller deployment is not affected.
+
+### Installing with a Custom Entrypoint
+
+Pass `--custom-entrypoint <file>` to the install script:
+
+```shell
+./deploy/install-driver.sh --custom-entrypoint ./my-entrypoint.sh local
+```
+
+This creates a ConfigMap from the provided file and restarts the node DaemonSet pods to use it.
+
+### Reverting to the Built-in Entrypoint
+
+Run the install script without the `--custom-entrypoint` flag:
+
+```shell
+./deploy/install-driver.sh local
+```
+
+This deletes the ConfigMap and restarts the node pods to use the built-in entrypoint. **The custom entrypoint is not sticky** — each install must explicitly request it.
+
+### Important Notes
+
+- The custom entrypoint replaces the **entire** built-in entrypoint, including Lustre client installation logic. Your custom script is responsible for any required setup before launching the CSI driver binary.
+- A good starting point for a custom entrypoint is the built-in script at `pkg/azurelustreplugin/entrypoint.sh`.
+- **Security note:** the custom entrypoint is stored in the `csi-azurelustre-entrypoint` ConfigMap in `kube-system` and is executed by a privileged container. Treat this as a code-injection path: tightly restrict RBAC for creating or updating this ConfigMap, and only use custom entrypoints in trusted/admin scenarios.
+- If you edit the ConfigMap directly (e.g., `kubectl edit configmap csi-azurelustre-entrypoint -n kube-system`), you must manually restart the node DaemonSets for changes to take effect: `kubectl rollout restart daemonset csi-azurelustre-node-jammy csi-azurelustre-node-noble -n kube-system`
+- The uninstall script automatically cleans up the ConfigMap if it exists.
