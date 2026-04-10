@@ -323,9 +323,7 @@ func (d *Driver) Run(endpoint string, testBool bool) {
 		}
 	}
 
-	// TODO_JUSJIN: revisit these caps
 	// Initialize default library driver
-	// TODO_CHYIN: move this to {service}.go
 	d.AddControllerServiceCapabilities(controllerServiceCapabilities)
 	d.AddVolumeCapabilityAccessModes(volumeCapabilities)
 	d.AddNodeServiceCapabilities(nodeServiceCapabilities)
