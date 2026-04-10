@@ -118,7 +118,7 @@ spec:
               drop:
                 - ALL
         - name: azurelustre
-          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}-jammy
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}-noble
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
 {{- range $arg := .Values.controller.extraArgs }}
