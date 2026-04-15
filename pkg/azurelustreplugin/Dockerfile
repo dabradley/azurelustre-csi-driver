@@ -17,9 +17,10 @@ FROM ${srcImage}
 
 COPY "./_output/azurelustreplugin" "/app/azurelustreplugin"
 COPY "./pkg/azurelustreplugin/entrypoint.sh" "/app/entrypoint.sh"
+COPY "./pkg/azurelustreplugin/start.sh" "/app/start.sh"
 COPY "./pkg/azurelustreplugin/readinessProbe.sh" "/app/readinessProbe.sh"
 
-RUN chmod +x "/app/entrypoint.sh" && chmod +x "/app/readinessProbe.sh"
+RUN chmod +x "/app/azurelustreplugin" && chmod +x "/app/entrypoint.sh" && chmod +x "/app/start.sh" && chmod +x "/app/readinessProbe.sh"
 
 RUN apt-get update && \
   apt-get upgrade -y && \
@@ -39,4 +40,4 @@ WORKDIR "/app"
 LABEL maintainers="dabradley;t-mialve"
 LABEL description="Azure Lustre CSI driver"
 
-ENTRYPOINT ["/app/entrypoint.sh", "/app/azurelustreplugin"]
+ENTRYPOINT ["/app/start.sh", "/app/azurelustreplugin"]

@@ -161,6 +161,9 @@ spec:
               name: host-dev
             - mountPath: /etc/host-os-release
               name: host-os-release
+            - mountPath: /app/custom-entrypoint
+              name: custom-entrypoint
+              readOnly: true
           resources:
             limits:
               cpu: 1
@@ -193,3 +196,8 @@ spec:
             path: /etc/os-release
             type: File
           name: host-os-release
+        - name: custom-entrypoint
+          configMap:
+            name: csi-azurelustre-entrypoint
+            defaultMode: 0755
+            optional: true
