@@ -18,19 +18,29 @@ set -euo pipefail
 
 VERSION=${1#"v"}
 if [ -z "$VERSION" ]; then
-    echo "Must specify version!"
+    echo "Please specify the Kubernetes version: e.g."
+    echo "./update-gomod.sh v1.32.11"
     exit 1
 fi
-MODS=($(
-    curl -sS https://raw.githubusercontent.com/kubernetes/kubernetes/v${VERSION}/go.mod |
+
+# Determine which imports must be replaced
+mapfile -t MODS < <(
+    curl -sS "https://raw.githubusercontent.com/kubernetes/kubernetes/v${VERSION}/go.mod" |
     sed -n 's|.*k8s.io/\(.*\) => ./staging/src/k8s.io/.*|k8s.io/\1|p'
-))
+)
+
+# Add replace statements to the go.mod file with the version Kubernetes is using for them.
 for MOD in "${MODS[@]}"; do
-    echo $MOD
+    echo "${MOD}"
     V=$(
         go mod download -json "${MOD}@kubernetes-${VERSION}" |
         sed -n 's|.*"Version": "\(.*\)".*|\1|p'
     )
-    echo ${V}
+    echo "${V}"
     go mod edit "-replace=${MOD}=${MOD}@${V}"
 done
+
+go get "k8s.io/kubernetes@v${VERSION}"
+go mod download
+go mod tidy
+go mod vendor
