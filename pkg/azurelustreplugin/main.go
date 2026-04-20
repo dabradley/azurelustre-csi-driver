@@ -17,10 +17,16 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
+	"strings"
+	"time"
 
+	"k8s.io/component-base/metrics/legacyregistry"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/azurelustre-csi-driver/pkg/azurelustre"
 )
@@ -29,6 +35,7 @@ var (
 	endpoint                     = flag.String("endpoint", "unix://tmp/csi.sock", "CSI endpoint")
 	nodeID                       = flag.String("nodeid", "", "node id")
 	version                      = flag.Bool("version", false, "Print the version and exit.")
+	metricsAddress               = flag.String("metrics-address", "", "export the metrics at the given address (e.g. 0.0.0.0:29764)")
 	driverName                   = flag.String("drivername", azurelustre.DefaultDriverName, "name of the driver")
 	enableAzureLustreMockMount   = flag.Bool("enable-azurelustre-mock-mount", false, "Whether enable mock mount(only for testing)")
 	enableAzureLustreMockDynProv = flag.Bool("enable-azurelustre-mock-dyn-prov", false, "Whether enable mock dynamic provisioning(only for testing)")
@@ -63,7 +70,41 @@ func run() error {
 		return nil
 	}
 
+	exportMetrics()
 	return handle()
+}
+
+func exportMetrics() {
+	if *metricsAddress == "" {
+		return
+	}
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", *metricsAddress)
+	if err != nil {
+		klog.Fatalf("failed to get listener for metrics endpoint: %v", err)
+	}
+	klog.V(2).Infof("set up prometheus metrics server on %v", l.Addr().String())
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", legacyregistry.Handler())
+		server := &http.Server{
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		// server.Serve closes the listener when it returns
+		if err := trapClosedConnErr(server.Serve(l)); err != nil {
+			klog.Fatalf("metrics serve failure(%v), address(%v)", err, l.Addr().String())
+		}
+	}()
+}
+
+func trapClosedConnErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "use of closed network connection") {
+		return nil
+	}
+	return err
 }
 
 func handle() error {

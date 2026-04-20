@@ -46,6 +46,7 @@ sidecars:
 
 controller:
   replicas: 2
+  metricsPort: 29764
   resources:
     limits:
       cpu: 1
@@ -71,6 +72,7 @@ controller:
   extraArgs: ["-v=5"]
 
 node:
+  metricsPort: 29765
   tolerations:
     - operator: "Exists"
   updateStrategy:

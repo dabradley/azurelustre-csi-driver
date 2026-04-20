@@ -17,6 +17,8 @@ spec:
     metadata:
       annotations:
         cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.controller.metricsPort | quote }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -125,9 +127,13 @@ spec:
             - {{ $arg | quote }}
 {{- end }}
             - --endpoint=$(CSI_ENDPOINT)
+            - --metrics-address=0.0.0.0:{{ .Values.controller.metricsPort }}
           ports:
             - containerPort: {{ .Values.sidecars.livenessProbe.controller.healthPort }}
               name: healthz
+              protocol: TCP
+            - containerPort: {{ .Values.controller.metricsPort }}
+              name: metrics
               protocol: TCP
           livenessProbe:
             failureThreshold: 5

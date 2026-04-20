@@ -88,7 +88,9 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | `controller.replicas` | Controller replicas | `2` |
 | `controller.priorityClassName` | Controller pod priority class | `system-cluster-critical` |
 | `controller.extraArgs` | Extra args passed to controller driver | `["-v=5"]` |
+| `controller.metricsPort` | Metrics port for controller | `29764` |
 | `node.priorityClassName` | Node pod priority class | `system-node-critical` |
+| `node.metricsPort` | Metrics port for node | `29765` |
 | `node.lustreClient.install` | Install Lustre client on nodes | `true` |
 | `node.jammy.lustreClient.version` | Lustre client version for jammy flavor | `2.15.8` |
 | `node.jammy.lustreClient.shaSuffix` | Lustre client SHA suffix for jammy flavor | `34-gc0f2040` |
