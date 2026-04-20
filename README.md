@@ -37,6 +37,7 @@ Starting with v0.4.0, the driver ships separate images per node OS: `-jammy` (Ub
 - [Install CSI driver in AKS cluster](./docs/install-csi-driver.md)
 - [Deploy workload with Static Provisioning](./docs/static-provisioning.md)
 - [Deploy workload with Dynamic Provisioning](./docs/dynamic-provisioning.md)
+- [Prometheus Metrics](./docs/metrics.md)
 
 &nbsp;
 

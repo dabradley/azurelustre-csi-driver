@@ -17,8 +17,15 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -76,4 +83,85 @@ func TestInitKlogFlags_InvalidThreshold(t *testing.T) {
 
 	// Assert
 	assert.Error(t, err, "expected error for invalid stderrthreshold value")
+}
+
+func TestTrapClosedConnErr(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantNil bool
+	}{
+		{
+			name:    "nil error returns nil",
+			err:     nil,
+			wantNil: true,
+		},
+		{
+			name:    "closed connection error returns nil",
+			err:     errors.New("accept tcp [::]:1234: use of closed network connection"),
+			wantNil: true,
+		},
+		{
+			name:    "other error is returned",
+			err:     errors.New("bind: address already in use"),
+			wantNil: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trapClosedConnErr(tt.err)
+			if tt.wantNil {
+				assert.NoError(t, got, "expected nil error for input: %v", tt.err)
+			} else {
+				assert.Error(t, got, "expected non-nil error for input: %v", tt.err)
+			}
+		})
+	}
+}
+
+func TestExportMetrics_ServesPrometheusContent(t *testing.T) {
+	// Bind a random port, then close it so exportMetrics can use it.
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err, "failed to find free port")
+	addr := l.Addr().String()
+	require.NoError(t, l.Close(), "failed to close temp listener")
+
+	// Set the flag and call exportMetrics.
+	*metricsAddress = addr
+	t.Cleanup(func() { *metricsAddress = "" })
+	exportMetrics()
+
+	// Poll until the server is ready (max 3 seconds).
+	var resp *http.Response
+	deadline := time.Now().Add(3 * time.Second)
+	client := &http.Client{Timeout: 1 * time.Second}
+	for time.Now().Before(deadline) {
+		req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet,
+			fmt.Sprintf("http://%s/metrics", addr), nil)
+		require.NoError(t, reqErr, "failed to create request")
+		resp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	require.NoError(t, err, "metrics endpoint never became ready")
+	t.Cleanup(func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Logf("failed to close response body: %v", closeErr)
+		}
+	})
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "expected HTTP 200 from /metrics")
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err, "failed to read response body")
+	assert.Contains(t, string(body), "# HELP", "expected prometheus exposition format")
+}
+
+func TestExportMetrics_DisabledWhenEmpty(t *testing.T) {
+	*metricsAddress = ""
+	t.Cleanup(func() { *metricsAddress = "" })
+	// Should return immediately without error or side effects.
+	exportMetrics()
 }
