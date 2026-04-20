@@ -1,0 +1,36 @@
+{{- if .Values.metrics.service.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "azurelustre.fullname" . }}-controller-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: csi-azurelustre-controller
+    {{- include "azurelustre.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: csi-azurelustre-controller
+  ports:
+    - name: metrics
+      port: {{ .Values.controller.metricsPort }}
+      targetPort: {{ .Values.controller.metricsPort }}
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "azurelustre.fullname" . }}-node-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: csi-azurelustre-node
+    {{- include "azurelustre.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: csi-azurelustre-node
+  ports:
+    - name: metrics
+      port: {{ .Values.node.metricsPort }}
+      targetPort: {{ .Values.node.metricsPort }}
+  type: ClusterIP
+{{- end }}
