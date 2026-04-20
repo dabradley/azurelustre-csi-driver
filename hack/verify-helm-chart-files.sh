@@ -81,6 +81,13 @@ for flavor in ${ALL_FLAVORS}; do
   CHARTS_FOR_DEPLOY_FILE["deploy/csi-azurelustre-node-${flavor}.yaml"]="templates/node-daemonset-${flavor}.yaml"
 done
 
+# Chart templates that have no deploy file equivalent (helm-only metrics
+# services) and are therefore exempt from the deploy<->chart unlisted-file check.
+HELM_ONLY_TEMPLATES=(
+"templates/metrics-service.yaml"
+"templates/metrics-service-monitor.yaml"
+)
+
 yq_format() {
   # Format yaml for diffing
   yq eval -o=props --properties-array-brackets '
@@ -128,7 +135,21 @@ check_unlisted_files() {
   done
   for file in ${all_charts_files}; do
     # Check for all actual chart files in deploy references
-    if ! grep -q -R -F "templates/$(basename "${file}")" - <<<"${referenced_charts_files}"; then
+    local template_name
+    template_name="templates/$(basename "${file}")"
+    # Skip helm-only templates (metrics services) that have no deploy-file
+    # equivalent by design.
+    local is_helm_only=false
+    for exempt in "${HELM_ONLY_TEMPLATES[@]}"; do
+      if [[ "${template_name}" == "${exempt}" ]]; then
+        is_helm_only=true
+        break
+      fi
+    done
+    if [[ "${is_helm_only}" == true ]]; then
+      continue
+    fi
+    if ! grep -q -R -F "${template_name}" - <<<"${referenced_charts_files}"; then
       echo "File ${file} missing from list of deploy files!"
       file_not_found=true
     fi

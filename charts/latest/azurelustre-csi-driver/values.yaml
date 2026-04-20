@@ -151,6 +151,15 @@ nameOverride: ""
 fullnameOverride: ""
 podAnnotations: {}
 podLabels: {}
+
+metrics:
+  service:
+    enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 15s
+    labels: {}
+
 paths:
   kubelet: /var/lib/kubelet
   kubernetes: /etc/kubernetes

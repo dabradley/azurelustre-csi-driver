@@ -1,0 +1,18 @@
+---
+# Service exposing the controller Prometheus metrics endpoint.
+# Apply this to enable Prometheus service-based discovery for the controller.
+apiVersion: v1
+kind: Service
+metadata:
+  name: csi-azurelustre-controller-metrics
+  namespace: kube-system
+  labels:
+    app: csi-azurelustre-controller
+spec:
+  selector:
+    app: csi-azurelustre-controller
+  ports:
+    - name: metrics
+      port: 29764
+      targetPort: 29764
+  type: ClusterIP

@@ -108,7 +108,11 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | `paths.dev` | Host /dev path | `/dev` |
 | `paths.osRelease` | Host OS release file | `/etc/os-release` |
 | `imagePullSecrets` | Image pull secrets array | `[]` |
+| `metrics.service.enabled` | Create ClusterIP Service for metrics endpoints | `false` |
+| `metrics.serviceMonitor.enabled` | Create ServiceMonitor for Prometheus Operator | `false` |
+| `metrics.serviceMonitor.interval` | Prometheus scrape interval | `15s` |
+| `metrics.serviceMonitor.labels` | Extra labels on ServiceMonitor resources | `{}` |
 
 For full parameter set see `charts/latest/azurelustre-csi-driver/values.yaml`.
 
-For development details see repository root `README.md` and docs in `docs/`.
+For metrics configuration details see [docs/metrics.md](../docs/metrics.md).
