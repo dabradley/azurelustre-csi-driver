@@ -18,7 +18,7 @@ Starting with v0.4.0, the driver ships separate images per Ubuntu distribution: 
 
 | Driver version | Image | Supported k8s version | Lustre client version |
 | -------------- | ----- | --------------------- | --------------------- |
-| main branch | mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:latest-jammy<br>mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:latest-noble | 1.21+ | 2.15.7 |
+| main branch | mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-jammy<br>mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-noble | 1.21+ | 2.15.7 |
 | v0.4.0 | mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-jammy<br>mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-noble | 1.21+ | 2.15.7 |
 | v0.3.1 | mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.3.1 | 1.21+ | 2.15.7 |
 | v0.3.0 | mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.3.0 | 1.21+ | 2.15.5 |
