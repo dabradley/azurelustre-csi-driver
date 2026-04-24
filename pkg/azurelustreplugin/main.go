@@ -42,6 +42,14 @@ func main() {
 	if err != nil {
 		klog.Fatalln(err)
 	}
+	err = flag.Set("legacy_stderr_threshold_behavior", "false")
+	if err != nil {
+		klog.Fatalln(err)
+	}
+	err = flag.Set("stderrthreshold", "INFO")
+	if err != nil {
+		klog.Fatalln(err)
+	}
 	flag.Parse()
 	if *version {
 		info, err := azurelustre.GetVersionYAML(*driverName)
