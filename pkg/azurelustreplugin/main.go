@@ -38,8 +38,7 @@ var (
 
 func main() {
 	klog.InitFlags(nil)
-	err := flag.Set("logtostderr", "true")
-	if err != nil {
+	if err := initKlogFlags(); err != nil {
 		klog.Fatalln(err)
 	}
 	flag.Parse()
@@ -74,4 +73,21 @@ func handle() {
 		klog.Fatalln("Failed to initialize Azure Lustre CSI driver")
 	}
 	driver.Run(*endpoint, false)
+}
+
+// initKlogFlags configures klog flags for the CSI driver:
+//   - logtostderr=true: log to stderr instead of files
+//   - legacy_stderr_threshold_behavior=false: honor stderrthreshold even when logtostderr=true
+//   - stderrthreshold=INFO: preserve current behavior where all severity levels are logged
+func initKlogFlags() error {
+	if err := flag.Set("logtostderr", "true"); err != nil {
+		return fmt.Errorf("failed to set logtostderr: %w", err)
+	}
+	if err := flag.Set("legacy_stderr_threshold_behavior", "false"); err != nil {
+		return fmt.Errorf("failed to set legacy_stderr_threshold_behavior: %w", err)
+	}
+	if err := flag.Set("stderrthreshold", "INFO"); err != nil {
+		return fmt.Errorf("failed to set stderrthreshold: %w", err)
+	}
+	return nil
 }
