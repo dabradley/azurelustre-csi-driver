@@ -28,7 +28,7 @@ cd "${ROOT}"
 TMP_DIR=$(mktemp -d)
 
 # cleanup
-# shellcheck disable=SC2317 # exitHandler is invoked via trap EXIT, not called directly
+# shellcheck disable=SC2329 # exitHandler is invoked via trap EXIT, not called directly
 exitHandler() {
   echo "Cleaning up..."
   rm -rf "${TMP_DIR}"
