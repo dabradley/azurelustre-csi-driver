@@ -67,9 +67,30 @@ fi
 
 if [[ -z "${SKIP_CLEANUP:-}" ]]; then
 	print_logs_case "Executing cleanup"
-	sleep 180
+
+	# Clean up resources left behind by test suites.
+	# The sample workload (from fault-test / update-test) may still be running.
+	# Wrap pre-cleanup steps with `|| true` so the cleanup job below always runs;
+	# it's the last-resort full sweep and must not be skipped on a partial failure.
+	print_logs_info "Stopping sample workload if still running"
+	stop_sample_workload || true
+
+	# Clean up external-e2e StorageClass if it still exists.
+	# (External-e2e PVC is deleted by external-e2e/run.sh's EXIT trap.)
+	print_logs_info "Cleaning up external e2e test resources"
+	kubectl delete sc testazurelustre.csi.azure.com --ignore-not-found --wait=true || true
+
+	# Wait for any PVs provisioned by our CSI driver to be cleaned up
+	print_logs_info "Waiting for test PVs to be deleted"
+	for pv in $(kubectl get pv -o jsonpath='{.items[?(@.spec.csi.driver=="azurelustre.csi.azure.com")].metadata.name}'); do
+		kubectl wait --for=delete "pv/${pv}" --timeout=300s || true
+	done
+
+	# Delete any pods stuck in Failed state
+	kubectl delete pods --field-selector=status.phase=Failed --all-namespaces --ignore-not-found || true
+
 	kubectl apply -f ./cleanup/cleanupjob.yaml
-	kubectl wait --for=condition=complete job/cleanup
+	kubectl wait --for=condition=complete job/cleanup --timeout=600s
 	kubectl delete -f ./cleanup/cleanupjob.yaml
 else
 	print_logs_case "Skipping cleanup (SKIP_CLEANUP is set)"
