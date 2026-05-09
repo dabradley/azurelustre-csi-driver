@@ -41,9 +41,38 @@ cat ${sc_file}
 
 clean_up_and_print_logs() {
     echo "clean up"
-    sleep 180
-    kubectl delete -f ${claim_file} --ignore-not-found
-    kubectl delete -f ${sc_file} --ignore-not-found
+
+    # Clean up any test namespaces left behind by ginkgo e2e framework.
+    # On normal completion ginkgo cleans up, but on abort/timeout they linger
+    # with pods, PVCs, and other resources inside. Deleting the namespace
+    # cascades to all namespaced resources within it.
+    for ns in $(kubectl get ns -o name | grep 'namespace/e2e-' || true); do
+        echo "Deleting leftover test namespace: ${ns}"
+        kubectl delete "${ns}" --wait=true --timeout=300s || true
+    done
+
+    # Delete test PVC (from reclaim policy test) and wait for it to be gone
+    kubectl delete -f ${claim_file} --ignore-not-found --wait=true --timeout=300s || true
+
+    # Wait for any PVs provisioned by our CSI driver to be cleaned up.
+    # These are cluster-scoped and may linger after namespace deletion if
+    # the reclaim policy is Retain, or if PV deletion is slow.
+    for pv in $(kubectl get pv -o jsonpath='{.items[?(@.spec.csi.driver=="azurelustre.csi.azure.com")].metadata.name}'); do
+        echo "Waiting for PV deletion: ${pv}"
+        kubectl delete "pv/${pv}" --ignore-not-found --wait=true --timeout=300s || true
+    done
+
+    # Clean up VolumeAttachments for our CSI driver (cluster-scoped).
+    # Filter directly by attacher in jsonpath so we only get our driver's
+    # VolumeAttachments.
+    for va in $(kubectl get volumeattachment -o jsonpath='{.items[?(@.spec.attacher=="azurelustre.csi.azure.com")].metadata.name}'); do
+        echo "Deleting leftover VolumeAttachment: ${va}"
+        kubectl delete volumeattachment "${va}" --ignore-not-found --timeout=120s || true
+    done
+
+    # Delete StorageClass used by the tests
+    kubectl delete -f ${sc_file} --ignore-not-found --wait=true || true
+
     echo "print out driver logs ..."
     bash ${REPO_ROOT_PATH}/utils/azurelustre_log.sh
 }
