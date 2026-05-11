@@ -91,6 +91,7 @@ if [[ "${installClientPackages}" == "yes" ]]; then
   pkgName="amlfs-lustre-client-${pkgVersion}"
   echo "pkgName: ${pkgName}"
 
+  # shellcheck disable=SC1091,SC2154 # /etc/os-release sets VERSION_CODENAME
   osReleaseCodeName=$(. /etc/os-release; echo "${VERSION_CODENAME}")
   if [[ -z "${osReleaseCodeName}" ]]; then
     echo "Could not determine OS release codename"

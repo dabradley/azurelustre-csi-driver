@@ -30,6 +30,7 @@ fi
 echo "Node pod detected - performing Lustre-specific readiness checks"
 
 # Check if CSI socket exists and is accessible
+# shellcheck disable=SC2154 # CSI_ENDPOINT: standard CSI env var injected by kubelet
 SOCKET_PATH=${CSI_ENDPOINT#unix://}
 
 if [[ ! -S "${SOCKET_PATH}" ]]; then

@@ -20,7 +20,7 @@ echo "begin to verify chart tgz files ..."
 git config core.filemode false
 
 # verify whether chart config has changed
-diff=`git diff`
+diff=$(git diff)
 if [[ -n "${diff}" ]]; then
   echo "${diff}"
   exit 1
@@ -28,15 +28,16 @@ fi
 
 for dir in charts/*
 do
-  if [ -d $dir ]; then
-    if [ -f $dir/*.tgz ]; then
-      echo "verify $dir ..."
-      tar -xvf $dir/*.tgz -C $dir/
-    fi
+  if [[ -d "${dir}" ]]; then
+    for tgz in "${dir}"/*.tgz; do
+      [[ -f "${tgz}" ]] || continue
+      echo "verify ${dir} ..."
+      tar -xvf "${tgz}" -C "${dir}"/
+    done
   fi
 done
 
-diff=`git diff`
+diff=$(git diff)
 if [[ -n "${diff}" ]]; then
   echo
   echo

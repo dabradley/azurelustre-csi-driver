@@ -30,10 +30,13 @@ fi
 echo "Verifying markdownlint"
 
 # Collect markdown files tracked by git, excluding vendor only
+files_output=$(git ls-files '*.md' ':!vendor/')
 FILES=()
-while IFS= read -r f; do
-  FILES+=("${f}")
-done < <(git ls-files '*.md' ':!vendor/')
+if [[ -n "${files_output}" ]]; then
+  while IFS= read -r f; do
+    FILES+=("${f}")
+  done <<< "${files_output}"
+fi
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
   echo "No markdown files found."

@@ -35,6 +35,7 @@ exitHandler() {
 }
 trap exitHandler EXIT
 
+# shellcheck disable=SC2312 # command -v prints nothing on failure; -z captures both signals
 if [[ -z "$(command -v misspell)" ]]; then
   echo "Cannot find misspell. Installing misspell..."
   # perform go get in a temp dir as we are not tracking this version in a go module
