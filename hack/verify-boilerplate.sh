@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2014 The Kubernetes Authors.
 #
@@ -25,19 +25,20 @@ if [[ -z "$(command -v python)" ]]; then
   update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 fi
 
-REPO_ROOT=$(dirname "${BASH_SOURCE}")/..
+REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 
 boilerDir="${REPO_ROOT}/hack/boilerplate"
 boiler="${boilerDir}/boilerplate.py"
 
-files_need_boilerplate=($(${boiler} --rootdir=${REPO_ROOT} --verbose))
-
-# Run boilerplate.py unit tests
-unitTestOut="$(mktemp)"
-trap cleanup EXIT
-cleanup() {
-	rm "${unitTestOut}"
-}
+# Capture into a variable first so a crash in boilerplate.py (syntax error,
+# missing dependency, etc.) propagates via set -e rather than being swallowed
+# by process substitution.
+boilerplate_output="$("${boiler}" --rootdir="${REPO_ROOT}" --verbose)"
+if [[ -n "${boilerplate_output}" ]]; then
+  mapfile -t files_need_boilerplate <<< "${boilerplate_output}"
+else
+  files_need_boilerplate=()
+fi
 
 # Run boilerplate check
 if [[ ${#files_need_boilerplate[@]} -gt 0 ]]; then
