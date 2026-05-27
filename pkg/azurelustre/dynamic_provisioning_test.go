@@ -37,7 +37,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storagecache/armstoragecache/v4/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -658,9 +657,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success(t *testing.T) {
 	expectedStorageCapacityTiB := float32(48)
 	expectedZone := "zone1"
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -698,9 +694,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success(t *testing.T) {
 func TestDynamicProvisioner_CreateAmlFilesystem_Success_Tags(t *testing.T) {
 	expectedTags := map[string]string{"tag1": "value1", "tag2": "value2"}
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -721,9 +714,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_Tags(t *testing.T) {
 func TestDynamicProvisioner_CreateAmlFilesystem_Success_Zone(t *testing.T) {
 	expectedZone := "zone1"
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -740,9 +730,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_Zone(t *testing.T) {
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Success_NoZone(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -757,9 +744,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_NoZone(t *testing.T) {
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Success_EmptyZone(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -776,9 +760,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_EmptyZone(t *testing.T) 
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Success_Identities(t *testing.T) {
 	expectedIdentities := []string{"identity1", "identity2"}
-
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
 
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
@@ -915,9 +896,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Aborted_TriesDeleteOnImmediateCl
 	}
 	for _, tC := range testCases {
 		t.Run(tC.desc, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
 			recorder := newMockAmlfsRecorder(tC.failureBehaviors)
 			dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -956,9 +934,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Aborted_TriesDeleteOnImmediateCl
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_Timeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-
 		recorder := newMockAmlfsRecorder([]string{})
 		dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 		// Use 1.5x the poll frequency so the deadline expires between poll ticks
@@ -981,9 +956,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_Timeout(t *testing.T) {
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_FailedDeleteOnRetryForClusterCreateTimeout(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	failureBehaviors := []string{
 		immediateClusterCreateTimeoutFailureName,
 		clusterRequestRetryDeleteFailureName,
@@ -1039,9 +1011,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_FailedClusterStateGetOnRetry
 	}
 	for _, tC := range testCases {
 		t.Run(tC.desc, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
 			failureBehaviors := []string{
 				tC.failureBehavior,
 			}
@@ -1077,9 +1046,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_FailedClusterStateGetOnRetry
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_NilClient(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -1137,9 +1103,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err(t *testing.T) {
 	}
 	for _, tC := range testCases {
 		t.Run(tC.desc, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
 			recorder := newMockAmlfsRecorder([]string{})
 			dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 			require.Empty(t, recorder.recordedAmlfsConfigurations)
@@ -1158,9 +1121,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err(t *testing.T) {
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_EmptySubnetInfo(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	require.Empty(t, recorder.recordedAmlfsConfigurations)
@@ -1175,9 +1135,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_EmptySubnetInfo(t *testing.T
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Err_EmptyInsufficientCapacity(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -1197,9 +1154,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Err_EmptyInsufficientCapacity(t 
 }
 
 func TestDynamicProvisioner_CreateAmlFilesystem_Success_NoCapacityCheckIfCurrentClusterStateBeforeCall(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	require.Empty(t, recorder.recordedAmlfsConfigurations)
@@ -1231,9 +1185,6 @@ func TestDynamicProvisioner_CreateAmlFilesystem_Success_NoCapacityCheckIfCurrent
 }
 
 func TestDynamicProvisioner_DeleteAmlFilesystem_Success(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	require.Empty(t, recorder.recordedAmlfsConfigurations)
@@ -1254,9 +1205,6 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_Success(t *testing.T) {
 }
 
 func TestDynamicProvisioner_DeleteAmlFilesystem_Err_NilCLient(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	dynamicProvisioner.amlFilesystemsClient = nil
@@ -1267,9 +1215,6 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_Err_NilCLient(t *testing.T) {
 
 func TestDynamicProvisioner_DeleteAmlFilesystem_Err_Timeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-
 		recorder := newMockAmlfsRecorder([]string{})
 		dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -1295,9 +1240,6 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_Err_Timeout(t *testing.T) {
 }
 
 func TestDynamicProvisioner_DeleteAmlFilesystem_Err_ImmediateFailure(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	require.Empty(t, recorder.recordedAmlfsConfigurations)
@@ -1318,9 +1260,6 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_Err_ImmediateFailure(t *testing.
 }
 
 func TestDynamicProvisioner_DeleteAmlFilesystem_Err_EventualFailure(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	require.Empty(t, recorder.recordedAmlfsConfigurations)
@@ -1342,9 +1281,6 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_Err_EventualFailure(t *testing.T
 
 func TestDynamicProvisioner_DeleteAmlFilesystem_Success_DeletesCorrectCluster(t *testing.T) {
 	otherAmlFilesystemName := expectedAmlFilesystemName + "2"
-
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
 
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
@@ -1370,9 +1306,6 @@ func TestDynamicProvisioner_DeleteAmlFilesystem_Success_DeletesCorrectCluster(t 
 }
 
 func TestDynamicProvisioner_CurrentClusterState_Success(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	require.Empty(t, recorder.recordedAmlfsConfigurations)
@@ -1390,9 +1323,6 @@ func TestDynamicProvisioner_CurrentClusterState_Success(t *testing.T) {
 }
 
 func TestDynamicProvisioner_CurrentClusterState_SuccessNotFound(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	require.Empty(t, recorder.recordedAmlfsConfigurations)
@@ -1403,9 +1333,6 @@ func TestDynamicProvisioner_CurrentClusterState_SuccessNotFound(t *testing.T) {
 }
 
 func TestDynamicProvisioner_CurrentClusterState_Err(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	require.Empty(t, recorder.recordedAmlfsConfigurations)
@@ -1416,9 +1343,6 @@ func TestDynamicProvisioner_CurrentClusterState_Err(t *testing.T) {
 }
 
 func TestDynamicProvisioner_CurrentClusterState_ErrNilClient(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	dynamicProvisioner.amlFilesystemsClient = nil
@@ -1428,9 +1352,6 @@ func TestDynamicProvisioner_CurrentClusterState_ErrNilClient(t *testing.T) {
 }
 
 func TestDynamicProvisioner_CheckSubnetCapacity_Success(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -1440,9 +1361,6 @@ func TestDynamicProvisioner_CheckSubnetCapacity_Success(t *testing.T) {
 }
 
 func TestDynamicProvisioner_CheckSubnetCapacity_FullVnet(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -1454,9 +1372,6 @@ func TestDynamicProvisioner_CheckSubnetCapacity_FullVnet(t *testing.T) {
 }
 
 func TestDynamicProvisioner_CheckSubnetCapacity_Err_NilMgmtClient(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	dynamicProvisioner.mgmtClient = nil
@@ -1466,9 +1381,6 @@ func TestDynamicProvisioner_CheckSubnetCapacity_Err_NilMgmtClient(t *testing.T) 
 }
 
 func TestDynamicProvisioner_CheckSubnetCapacity_Err_NilVnetClient(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	dynamicProvisioner.vnetClient = nil
@@ -1511,9 +1423,6 @@ func TestDynamicProvisioner_CheckSubnetCapacity_Err(t *testing.T) {
 	}
 	for _, tC := range testCases {
 		t.Run(tC.desc, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
 			recorder := newMockAmlfsRecorder([]string{})
 			dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 			require.Empty(t, recorder.recordedAmlfsConfigurations)
@@ -1525,9 +1434,6 @@ func TestDynamicProvisioner_CheckSubnetCapacity_Err(t *testing.T) {
 }
 
 func TestDynamicProvisioner_GetSkuValuesForLocation_Success(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -1545,9 +1451,6 @@ func TestDynamicProvisioner_GetSkuValuesForLocation_Success(t *testing.T) {
 }
 
 func TestDynamicProvisioner_GetSkuValuesForLocation_Err_NilClient(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 	dynamicProvisioner.skusClient = nil
@@ -1564,9 +1467,6 @@ func TestDynamicProvisioner_GetSkuValuesForLocation_Err_NilClient(t *testing.T) 
 }
 
 func TestDynamicProvisioner_GetSkuValuesForLocation_NoZonesAvailable(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
 	recorder := newMockAmlfsRecorder([]string{noZonesForLocation})
 	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
@@ -1622,9 +1522,6 @@ func TestDynamicProvisioner_GetSkuValuesForLocation_Errors(t *testing.T) {
 	}
 	for _, tC := range testCases {
 		t.Run(tC.desc, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
 			recorder := newMockAmlfsRecorder(tC.failureBehaviors)
 			dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
 
