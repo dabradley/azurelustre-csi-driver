@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2021 The Kubernetes Authors.
 #
@@ -20,30 +20,37 @@ set -o nounset
 set -o xtrace
 
 REPO_ROOT_PATH=${REPO_ROOT_PATH:-$(git rev-parse --show-toplevel)}
-KUBECONFIG=${KUBECONFIG:-$(echo "$HOME/.kube/config")}
-kubernetesVersion=${kubernetesVersion:-$(kubectl version -ojson | jq -r ".serverVersion.gitVersion")}
-echo "kubectl path $(which kubectl)"
+KUBECONFIG=${KUBECONFIG:-"${HOME}/.kube/config"}
+if [[ -z "${kubernetesVersion:-}" ]]; then
+    kubernetesVersion=$(kubectl version -ojson | jq -r ".serverVersion.gitVersion")
+    if [[ -z "${kubernetesVersion}" || "${kubernetesVersion}" == "null" ]]; then
+        echo "ERROR: Failed to determine Kubernetes version from cluster"
+        exit 1
+    fi
+fi
+echo "kubectl path $(command -v kubectl)"
 echo "REPO_ROOT_PATH ${REPO_ROOT_PATH}"
 echo "KUBECONFIG path ${KUBECONFIG}"
 echo "kubernetesVersion ${kubernetesVersion}"
 
-curl -sL https://dl.k8s.io/release/${kubernetesVersion}/kubernetes-test-linux-amd64.tar.gz --output ${REPO_ROOT_PATH}/e2e-tests.tar.gz
-tar -xvf ${REPO_ROOT_PATH}/e2e-tests.tar.gz --directory ${REPO_ROOT_PATH}
-rm ${REPO_ROOT_PATH}/e2e-tests.tar.gz
+curl -sSLf "https://dl.k8s.io/release/${kubernetesVersion}/kubernetes-test-linux-amd64.tar.gz" --output "${REPO_ROOT_PATH}/e2e-tests.tar.gz"
+tar -xvf "${REPO_ROOT_PATH}/e2e-tests.tar.gz" --directory "${REPO_ROOT_PATH}"
+rm "${REPO_ROOT_PATH}/e2e-tests.tar.gz"
 
 sc_file="${REPO_ROOT_PATH}/test/external-e2e/e2etest_storageclass.yaml"
 claim_file="${REPO_ROOT_PATH}/test/external-e2e/test_claim.yaml"
 
 echo "Generating test storageclass"
-sed "s/{lustre_fs_name}/${LUSTRE_FS_NAME}/g;s/{lustre_mgs_ip}/${LUSTRE_MGS_IP}/g" ${sc_file}.template > ${sc_file}
+# shellcheck disable=SC2154 # LUSTRE_FS_NAME, LUSTRE_MGS_IP: expected env vars set by CI pipeline (see test/long-haul/external-e2e.sh)
+sed "s/{lustre_fs_name}/${LUSTRE_FS_NAME}/g;s/{lustre_mgs_ip}/${LUSTRE_MGS_IP}/g" "${sc_file}.template" > "${sc_file}"
 echo "Generated storageclass"
-cat ${sc_file}
+cat "${sc_file}"
 
 clean_up_and_print_logs() {
     echo "clean up"
 
     # Delete test PVC (from reclaim policy test) and wait for it to be gone
-    kubectl delete -f ${claim_file} --ignore-not-found --wait=true --timeout=300s || true
+    kubectl delete -f "${claim_file}" --ignore-not-found --wait=true --timeout=300s || true
 
     # Collect the set of PVs created by this test (filtered by the test
     # StorageClass) so we can scope VolumeAttachment + PV cleanup to just
@@ -78,10 +85,10 @@ clean_up_and_print_logs() {
     done
 
     # Delete StorageClass used by the tests
-    kubectl delete -f ${sc_file} --ignore-not-found --wait=true || true
+    kubectl delete -f "${sc_file}" --ignore-not-found --wait=true || true
 
     echo "print out driver logs ..."
-    bash ${REPO_ROOT_PATH}/utils/azurelustre_log.sh
+    bash "${REPO_ROOT_PATH}"/utils/azurelustre_log.sh
 }
 
 trap clean_up_and_print_logs EXIT
@@ -92,28 +99,27 @@ mkdir -p /tmp/csi
 
 echo "begin to test reclaim policy"
 echo "deploy test storageclass with default reclaim policy (delete)"
-kubectl apply -f ${sc_file}
+kubectl apply -f "${sc_file}"
 echo "deploy test pvc"
-kubectl apply -f ${claim_file}
+kubectl apply -f "${claim_file}"
 echo "wait pvc to Bound status"
 # wait for json is supported in kubectl v1.24
-kubectl wait --for=jsonpath='{.status.phase}'=Bound -f ${claim_file} --timeout=600s
-bounded_pv=$(kubectl get -f ${claim_file} -ojsonpath='{.spec.volumeName}')
+kubectl wait --for=jsonpath='{.status.phase}'=Bound -f "${claim_file}" --timeout=600s
+bounded_pv=$(kubectl get -f "${claim_file}" -ojsonpath='{.spec.volumeName}')
 echo "bounded pv is ${bounded_pv}"
 echo "delete pvc"
-kubectl delete -f ${claim_file}
+kubectl delete -f "${claim_file}"
 echo "wait for the pvc to be deleted"
-kubectl wait --for=delete -f ${claim_file} --timeout=600s
+kubectl wait --for=delete -f "${claim_file}" --timeout=600s
 echo "wait for pv ${bounded_pv} to be deleted"
-kubectl wait --for=delete pv/${bounded_pv} --timeout=600s
+kubectl wait --for=delete "pv/${bounded_pv}" --timeout=600s
 
 echo "delete test storageclass"
-kubectl delete -f ${sc_file}
+kubectl delete -f "${sc_file}"
 
-# Skip of "SELinuxMountReadWriteOncePod" can be removed when we begin testing against Kubernetes version 1.27+
 echo "begin to run azurelustre tests ...."
-cp ${REPO_ROOT_PATH}/test/external-e2e/e2etest_storageclass.yaml /tmp/csi/storageclass.yaml
-${REPO_ROOT_PATH}/kubernetes/test/bin/ginkgo -p -v -focus="External.Storage.*.azurelustre.csi.azure.com" \
-    ${REPO_ROOT_PATH}/kubernetes/test/bin/e2e.test  -- \
-    -storage.testdriver=${REPO_ROOT_PATH}/test/external-e2e/testdriver-azurelustre.yaml \
-    --kubeconfig=${KUBECONFIG}
+cp "${REPO_ROOT_PATH}"/test/external-e2e/e2etest_storageclass.yaml /tmp/csi/storageclass.yaml
+"${REPO_ROOT_PATH}"/kubernetes/test/bin/ginkgo -p -v -focus="External.Storage.*.azurelustre.csi.azure.com" \
+    "${REPO_ROOT_PATH}"/kubernetes/test/bin/e2e.test  -- \
+    -storage.testdriver="${REPO_ROOT_PATH}"/test/external-e2e/testdriver-azurelustre.yaml \
+    --kubeconfig="${KUBECONFIG}"

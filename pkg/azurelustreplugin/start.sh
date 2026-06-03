@@ -20,7 +20,7 @@
 
 CUSTOM_ENTRYPOINT="/app/custom-entrypoint/entrypoint.sh"
 
-if [ -x "${CUSTOM_ENTRYPOINT}" ]; then
+if [[ -x "${CUSTOM_ENTRYPOINT}" ]]; then
     echo "$(date -u) Using custom entrypoint: ${CUSTOM_ENTRYPOINT}"
     exec "${CUSTOM_ENTRYPOINT}" "$@"
 fi

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2020 The Kubernetes Authors.
 #
@@ -20,22 +20,28 @@ set -o nounset
 
 REPO_ROOT_PATH=${REPO_ROOT_PATH:-$(git rev-parse --show-toplevel)}
 
-pushd "$REPO_ROOT_PATH/test/long-haul/"
+pushd "${REPO_ROOT_PATH}/test/long-haul/"
+# shellcheck source=test/long-haul/utils.sh
 source ./utils.sh
 
-export REPO_ROOT_PATH=$REPO_ROOT_PATH
+export REPO_ROOT_PATH=${REPO_ROOT_PATH}
+# shellcheck disable=SC2154 # aks_cluster_name: expected env var from the pipeline
 export ClusterName="${aks_cluster_name}"
+# shellcheck disable=SC2154 # aks_resource_group: expected env var from the pipeline
 export ResourceGroup="${aks_resource_group}"
+# shellcheck disable=SC2154 # aks_pool_name: expected env var from the pipeline
 export PoolName="${aks_pool_name}"
+# shellcheck disable=SC2154 # lustre_fs_name: expected env var from the pipeline
 export LustreFSName="${lustre_fs_name}"
+# shellcheck disable=SC2154 # lustre_fs_ip: expected env var from the pipeline
 export LustreFSIP="${lustre_fs_ip}"
 
-sed -i "s/{longhaul_agentpool}/$PoolName/g;s/{lustre_fs_name}/$LustreFSName/g;s/{lustre_fs_ip}/$LustreFSIP/g" ./sample-workload/deployment_write_print_file.yaml
-sed -i "s/{longhaul_agentpool}/$PoolName/g;s/{lustre_fs_name}/$LustreFSName/g;s/{lustre_fs_ip}/$LustreFSIP/g" ./cleanup/cleanupjob.yaml
+sed -i "s/{longhaul_agentpool}/${PoolName}/g;s/{lustre_fs_name}/${LustreFSName}/g;s/{lustre_fs_ip}/${LustreFSIP}/g" ./sample-workload/deployment_write_print_file.yaml
+sed -i "s/{longhaul_agentpool}/${PoolName}/g;s/{lustre_fs_name}/${LustreFSName}/g;s/{lustre_fs_ip}/${LustreFSIP}/g" ./cleanup/cleanupjob.yaml
 
-print_logs_info "Connecting to AKS Cluster=$ClusterName, ResourceGroup=$ResourceGroup, AKS pool=$PoolName"
-az configure --defaults group=$ResourceGroup
-az aks get-credentials --resource-group $ResourceGroup --name $ClusterName
+print_logs_info "Connecting to AKS Cluster=${ClusterName}, ResourceGroup=${ResourceGroup}, AKS pool=${PoolName}"
+az configure --defaults group="${ResourceGroup}"
+az aks get-credentials --resource-group "${ResourceGroup}" --name "${ClusterName}"
 
 if [[ -z "${SKIP_FAULT_TEST:-}" ]]; then
 	print_logs_case "Executing fault test"

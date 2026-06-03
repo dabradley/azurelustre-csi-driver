@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2025 The Kubernetes Authors.
 #
@@ -19,19 +19,20 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
-readonly volname="citest-$(date +%s)"
+volname="citest-$(date +%s)"
+readonly volname
 readonly volsize="2147483648"
 readonly endpoint="unix:///csi/csi.sock"
 readonly target_path="/tmp/target_path"
 readonly lustre_fs_ip=1.2.3.4
 
-mkdir -p $target_path
+mkdir -p "${target_path}"
 
 apt-get update
 apt-get install -y --no-install-recommends kmod wget git ca-certificates lsb-release gpg curl
 update-ca-certificates
 
-curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+curl -sSLf https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
 echo "deb [arch=amd64,arm64,armhf] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" | tee /etc/apt/sources.list.d/amlfs.list
 apt-get update
 
@@ -45,14 +46,14 @@ echo "$(date -u) Entering Lustre CSI driver"
 
 echo "$(date -u) install csc"
 go install github.com/dell/gocsi/csc@v1.13.0
-export PATH=$PATH:/root/go/bin # add csc to path
+export PATH=${PATH}:/root/go/bin # add csc to path
 
 mkdir /csi
 echo "$(date -u) Exiting Lustre CSI driver"
-nohup 2>&1 /app/azurelustreplugin --v=5 \
-              --endpoint=${endpoint} \
+nohup /app/azurelustreplugin --v=5 \
+              --endpoint="${endpoint}" \
               --enable-azurelustre-mock-mount \
-	      --nodeid=integrationtestnode >csi.log &
+	      --nodeid=integrationtestnode >csi.log 2>&1 &
 
 # Wait for the CSI socket to be created
 for _ in $(seq 1 30); do
@@ -76,15 +77,15 @@ value="$(csc controller new --endpoint "${endpoint}" \
                             --req-bytes "${volsize}" \
                             --params fs-name=lustrefs,mgs-ip-address="${lustre_fs_ip}")"
 
-volumeid="$(echo "$value" | awk '{print $1}' | sed 's/"//g')"
-echo "====: $(date -u) Volume ID is $volumeid"
+volumeid="$(echo "${value}" | awk '{print $1}' | sed 's/"//g')"
+echo "====: $(date -u) Volume ID is ${volumeid}"
 
 echo "====: $(date -u) Validate volume capabilities test:"
 csc controller validate-volume-capabilities --endpoint "${endpoint}" \
                                             --cap MULTI_NODE_MULTI_WRITER,mount,,, \
-                                            "$volumeid"
+                                            "${volumeid}"
 
-echo "====: $(date -u) Node publish volume test:"  # Requires routng to amlfs
+echo "====: $(date -u) Node publish volume test:"  # Requires routing to amlfs
 csc node publish --endpoint "${endpoint}" \
                  --cap MULTI_NODE_MULTI_WRITER,mount,,, \
                  --target-path "${target_path}" \
@@ -94,13 +95,13 @@ csc node publish --endpoint "${endpoint}" \
 echo "====: $(date -u) stats test:"
 csc node stats --endpoint "${endpoint}" "${volumeid}:${target_path}"
 
-echo "====: $(date -u) Node unpublish volume test:"  # Requires routng to amlfs
+echo "====: $(date -u) Node unpublish volume test:"  # Requires routing to amlfs
 csc node unpublish --endpoint "${endpoint}" \
-                   --target-path "$target_path" \
-                   "$volumeid"
+                   --target-path "${target_path}" \
+                   "${volumeid}"
 
 echo "====: $(date -u) Delete volume test:"
-csc controller del --endpoint "${endpoint}" "$volumeid"
+csc controller del --endpoint "${endpoint}" "${volumeid}"
 
 echo "====: $(date -u) Identity test:"
 csc identity plugin-info --endpoint "${endpoint}"

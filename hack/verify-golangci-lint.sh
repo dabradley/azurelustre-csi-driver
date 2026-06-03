@@ -16,6 +16,7 @@
 
 set -euo pipefail
 
+# shellcheck disable=SC2312 # golangci-lint version output is what we want; non-zero exit (not installed) also fails the comparison
 if [[ "$(golangci-lint version --short 2>/dev/null)" != "2."* ]]; then
   echo "golangci-lint not found or not v2.x. Installing golangci-lint..."
   gopath=$(go env GOPATH)

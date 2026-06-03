@@ -91,13 +91,16 @@ if [[ "${installClientPackages}" == "yes" ]]; then
   pkgName="amlfs-lustre-client-${pkgVersion}"
   echo "pkgName: ${pkgName}"
 
+  # shellcheck disable=SC1091,SC2154 # /etc/os-release sets VERSION_CODENAME
   osReleaseCodeName=$(. /etc/os-release; echo "${VERSION_CODENAME}")
   if [[ -z "${osReleaseCodeName}" ]]; then
     echo "Could not determine OS release codename"
     exit 1
   fi
 
+  # shellcheck disable=SC1091 # /etc/host-os-release exists only at runtime inside the container
   if ! grep -q -R "${osReleaseCodeName}" /etc/host-os-release; then
+    # shellcheck disable=SC2031 # intentional: read VERSION_CODENAME in a subshell to avoid polluting the current scope
     hostCodeName=$(. /etc/host-os-release; echo "${VERSION_CODENAME}")
     if [[ "${hostCodeName}" == "focal" && "${osReleaseCodeName}" == "jammy" ]]; then
       echo "Allowing jammy container on focal host, this usage is deprecated and will be removed in future"

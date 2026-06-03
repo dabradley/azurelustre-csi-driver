@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2020 The Kubernetes Authors.
 #
@@ -82,7 +82,7 @@ if [[ "$#" -eq 1 ]]; then
 fi
 
 verify="${repo}/install-driver.sh"
-if ! [ -f "${verify}" ]; then
+if ! [[ -f "${verify}" ]]; then
   if ! curl -L -Is --fail "${verify}" > /dev/null; then
     echo "Unknown repository: ${repo} ${verify} does not exist."
     usage
@@ -90,7 +90,7 @@ if ! [ -f "${verify}" ]; then
 fi
 
 echo
-echo "Installing Azure Lustre CSI Driver branch: $branch, repo: $repo ..."
+echo "Installing Azure Lustre CSI Driver branch: ${branch}, repo: ${repo} ..."
 
 # Handle custom entrypoint ConfigMap
 configmap_changed="false"
@@ -113,12 +113,12 @@ fi
 
 kubectl delete -n kube-system daemonset csi-azurelustre-node --ignore-not-found
 
-kubectl apply -f "$repo/rbac-csi-azurelustre-controller.yaml"
-kubectl apply -f "$repo/rbac-csi-azurelustre-node.yaml"
-kubectl apply -f "$repo/csi-azurelustre-driver.yaml"
-kubectl apply -f "$repo/csi-azurelustre-controller.yaml"
-kubectl apply -f "$repo/csi-azurelustre-node-jammy.yaml"
-kubectl apply -f "$repo/csi-azurelustre-node-noble.yaml"
+kubectl apply -f "${repo}/rbac-csi-azurelustre-controller.yaml"
+kubectl apply -f "${repo}/rbac-csi-azurelustre-node.yaml"
+kubectl apply -f "${repo}/csi-azurelustre-driver.yaml"
+kubectl apply -f "${repo}/csi-azurelustre-controller.yaml"
+kubectl apply -f "${repo}/csi-azurelustre-node-jammy.yaml"
+kubectl apply -f "${repo}/csi-azurelustre-node-noble.yaml"
 
 # Restart node DaemonSet pods only if the ConfigMap state changed.
 # The custom entrypoint ConfigMap is only mounted into node DaemonSets,

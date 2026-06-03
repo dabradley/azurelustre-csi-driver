@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2020 The Kubernetes Authors.
 #
@@ -19,15 +19,15 @@ set -euo pipefail
 repo="$(git rev-parse --show-toplevel)/deploy"
 
 for i in $(kubectl get daemonsets.apps -n kube-system -l app=csi-azurelustre-node -o name); do
-  kubectl delete -n kube-system $i
+  kubectl delete -n kube-system "${i}"
 done
 
-echo "Uninstalling Azure Lustre CSI driver, repo: $repo ..."
-kubectl delete -f $repo/csi-azurelustre-controller.yaml --ignore-not-found
-kubectl delete -f $repo/csi-azurelustre-node-jammy.yaml --ignore-not-found
-kubectl delete -f $repo/csi-azurelustre-node-noble.yaml --ignore-not-found
-kubectl delete -f $repo/csi-azurelustre-driver.yaml --ignore-not-found
-kubectl delete -f $repo/rbac-csi-azurelustre-controller.yaml --ignore-not-found
-kubectl delete -f $repo/rbac-csi-azurelustre-node.yaml --ignore-not-found
+echo "Uninstalling Azure Lustre CSI driver, repo: ${repo} ..."
+kubectl delete -f "${repo}"/csi-azurelustre-controller.yaml --ignore-not-found
+kubectl delete -f "${repo}"/csi-azurelustre-node-jammy.yaml --ignore-not-found
+kubectl delete -f "${repo}"/csi-azurelustre-node-noble.yaml --ignore-not-found
+kubectl delete -f "${repo}"/csi-azurelustre-driver.yaml --ignore-not-found
+kubectl delete -f "${repo}"/rbac-csi-azurelustre-controller.yaml --ignore-not-found
+kubectl delete -f "${repo}"/rbac-csi-azurelustre-node.yaml --ignore-not-found
 kubectl delete configmap csi-azurelustre-entrypoint -n kube-system --ignore-not-found
 echo 'Uninstalled Azure Lustre CSI driver successfully.'
