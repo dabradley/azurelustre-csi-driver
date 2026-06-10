@@ -82,11 +82,18 @@ For the full list of configurable values, version history, and advanced Helm usa
 
     $ kubectl get -n kube-system pod -l app=csi-azurelustre-node
 
-    NAME                              READY    STATUS    RESTARTS   AGE
-    csi-azurelustre-node-jammy-7lw2n   3/3     Running   0          30s
-    csi-azurelustre-node-jammy-drlq2   3/3     Running   0          30s
-    csi-azurelustre-node-noble-g6sfx   3/3     Running   0          30s
+    NAME                                     READY    STATUS    RESTARTS   AGE
+    csi-azurelustre-node-jammy-7lw2n          4/4     Running   0          30s
+    csi-azurelustre-node-noble-drlq2          4/4     Running   0          30s
+    csi-azurelustre-node-azurelinux3-g6sfx    4/4     Running   0          30s
     ```
+
+    Each node pod reports `4/4` once ready. The four containers are the
+    `lustre-loader` startup sidecar (a native sidecar — an init container with
+    `restartPolicy: Always` — that loads the Lustre kernel modules and brings
+    up LNet), the `azurelustre` driver, the `liveness-probe` sidecar, and
+    `node-driver-registrar`. See [Node pod container architecture](#node-pod-container-architecture)
+    below.
 
 ## Supported node operating systems
 
@@ -151,12 +158,37 @@ Before mounting Azure Lustre filesystems, it is important to verify that the CSI
 - Validate all network interfaces are operational
 - Complete all initialization steps
 
-### Enhanced Readiness Validation
+### Node pod container architecture
 
-The CSI driver deployment includes automated **exec-based readiness probes** for accurate readiness detection:
+Each `csi-azurelustre-node` pod runs four containers. Kernel-module loading and
+LNet setup are split into a dedicated startup sidecar so the CSI driver socket
+opens quickly and the `node-driver-registrar` never races a slow client install:
 
-- **Readiness & Startup Probes**: `/app/readinessProbe.sh` - Exec-based validation with comprehensive LNet checking
-- **Liveness Probe**: `/healthz` (Port 29763) - HTTP endpoint for basic container health
+| Container | Kind | Responsibility | Health checks |
+| --------- | ---- | -------------- | ------------- |
+| `lustre-loader` | native sidecar (init container with `restartPolicy: Always`) | Installs the full Lustre client metapackage, loads the kernel modules into the shared host kernel, configures LNet, then runs an LNet-config reconcile loop for the life of the pod. | `startupProbe` + `readinessProbe`: `/app/readinessProbe.sh` (full LNet health — NIDs, self-ping, interfaces). `livenessProbe`: `test -d /sys/module/lnet` (restart only if the kernel module disappears). |
+| `azurelustre` | driver | Installs the userspace Lustre tools, then serves the CSI gRPC API. | `readinessProbe`: `test -S /csi/csi.sock` (driver socket is serving). `livenessProbe`: `/healthz` HTTP on port 29763. |
+| `liveness-probe` | sidecar | Exposes the driver's `/healthz` endpoint to the kubelet. | — |
+| `node-driver-registrar` | sidecar | Registers the driver socket with the kubelet. | `livenessProbe`: registration probe. |
+
+The pod's overall `Ready` condition is the AND of every container's readiness,
+including the `lustre-loader` sidecar (a native sidecar's `readinessProbe`
+contributes to pod readiness). So **a node pod reports `Ready` only when LNet is
+healthy *and* the driver socket is serving** — this is the signal to wait on
+before mounting Lustre volumes.
+
+> [!NOTE]
+> The `lustre-loader` sidecar runs first and its `startupProbe` gates the
+> `azurelustre` and `node-driver-registrar` containers from starting until LNet
+> is up. On Azure Linux 3 the Lustre client install is larger than on Ubuntu, so
+> a fresh node pod takes longer to reach `Ready` — this is expected, not a
+> failure. Wait on the pod `Ready` condition (e.g. `kubectl wait
+> --for=condition=ready`) rather than a fixed timeout or the raw container count.
+
+### Readiness validation
+
+The CSI driver deployment includes automated **exec-based probes** for accurate
+readiness detection (see the table above for which container owns each probe):
 
 #### Verification Steps
 
@@ -166,7 +198,7 @@ The CSI driver deployment includes automated **exec-based readiness probes** for
    kubectl get -n kube-system pod -l app=csi-azurelustre-node -o wide
    ```
 
-   All node pods should show `READY` status as `3/3` and `STATUS` as `Running`.
+   All node pods should show `READY` as `4/4` and `STATUS` as `Running`.
 
 2. **Verify probe configuration:**
 
@@ -174,15 +206,27 @@ The CSI driver deployment includes automated **exec-based readiness probes** for
    kubectl describe -n kube-system pod -l app=csi-azurelustre-node
    ```
 
-   Look for exec-based readiness and startup probe configuration and check that no recent probe failures appear in the Events section.
+   Look for the `lustre-loader` sidecar's exec-based readiness/startup probes and
+   the `azurelustre` driver's socket readiness probe, and check that no recent
+   probe failures appear in the Events section.
 
-3. **Monitor validation logs:**
+3. **Monitor LNet validation logs (loader sidecar):**
+
+   ```shell
+   kubectl logs -n kube-system -l app=csi-azurelustre-node -c lustre-loader --tail=20
+   ```
+
+   Look for `LNet is loaded` and reconcile-loop messages indicating LNet
+   initialization is complete.
+
+4. **Monitor driver logs:**
 
    ```shell
    kubectl logs -n kube-system -l app=csi-azurelustre-node -c azurelustre --tail=20
    ```
 
-   Look for CSI driver startup and successful GRPC operation logs indicating driver initialization is complete.
+   Look for `Listening for connections` and successful GRPC operation logs
+   indicating the driver socket is serving.
 
 > **Note**: If you encounter readiness or initialization issues, see the [CSI Driver Troubleshooting Guide](csi-debug.md#enhanced-lnet-validation-troubleshooting) for detailed debugging steps.
 
