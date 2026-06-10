@@ -50,8 +50,31 @@ Container images follow the pattern:
 - `mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-azurelinux3`
 
 Ubuntu images use `apt-get` to install Lustre client deb packages. The Azure Linux 3 image
-uses `tdnf` to install Lustre client RPM packages. Both use the same `amlfs-lustre-client-*`
-metapackage to keep kernel modules and userspace tools in sync.
+uses `tdnf` to install Lustre client RPM packages. The `lustre-loader` sidecar installs the
+full `amlfs-lustre-client-*` metapackage (kernel modules + userspace tools), while the
+`azurelustre` driver container installs only the userspace tools; both come from the same
+package family so kernel modules and userspace tools stay in sync.
+
+## Node pod containers
+
+Every node pod (all three flavors) runs the same four-container layout, and the
+same per-flavor image is reused across the first two — the behavior is selected
+at runtime via the `AZURELUSTRE_CSI_ROLE` environment variable:
+
+1. **`lustre-loader`** — a native sidecar (an init container with
+   `restartPolicy: Always`, `AZURELUSTRE_CSI_ROLE=loader`). Installs the full
+   `amlfs-lustre-client-*` metapackage, loads the Lustre kernel modules into the
+   shared host kernel, configures LNet, then runs an LNet-config reconcile loop
+   for the life of the pod. Its `startupProbe` gates the remaining containers
+   until LNet is up, and on termination its `SIGTERM` handler unloads the
+   modules so nothing is left behind on the host. The unload is best effort: the
+   kernel refuses to remove modules that are still in use, so on a node with a
+   mounted Lustre filesystem the modules stay resident and the loader logs a
+   `WARNING:`.
+2. **`azurelustre`** — the CSI driver (`AZURELUSTRE_CSI_ROLE=driver`). Installs
+   only the kernel-agnostic userspace tools, then serves the CSI gRPC socket.
+3. **`liveness-probe`** and **`node-driver-registrar`** — the standard
+   kubernetes-csi sidecars.
 
 ## Troubleshooting
 

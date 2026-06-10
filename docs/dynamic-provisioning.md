@@ -12,7 +12,7 @@ using the Lustre CSI driver.
 kubelet identity must have the correct permissions granted to it.
 
 Ensure that the kubelet identity has all of the permissions that are listed in the section
-on [Permissions For Kubelet Identity](driver-parameters.md#Permissions%20For%20Kubelet%20Identity).
+on [Permissions For Kubelet Identity](driver-parameters.md#permissions-for-kubelet-identity).
 
 ### Network Egress
 

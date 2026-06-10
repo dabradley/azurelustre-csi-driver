@@ -147,10 +147,10 @@ spec:
             timeoutSeconds: 10
             periodSeconds: 30
           env:
+            - name: AZURELUSTRE_CSI_ROLE
+              value: controller
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
-            - name: AZURELUSTRE_CSI_INSTALL_LUSTRE_CLIENT
-              value: "no"
             # Naming one credential keeps the chain from silently falling back to
             # another identity, and skips the IMDS probe timeout on the managed path.
             - name: AZURE_TOKEN_CREDENTIALS
