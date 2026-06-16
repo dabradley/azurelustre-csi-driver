@@ -124,6 +124,9 @@ if [[ "${installClientPackages}" == "yes" ]]; then
     ARCH="arm64"
   fi
 
+  # Use azure.archive.ubuntu.com mirror for package installation
+  /app/useAzureAptMirror.sh
+
   echo "$(date -u) Adding Microsoft package repository for Lustre client modules, architecture=${ARCH}."
   curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
   echo "deb [arch=${ARCH}] https://packages.microsoft.com/repos/amlfs-${osReleaseCodeName}/ ${osReleaseCodeName} main" | tee /etc/apt/sources.list.d/amlfs.list
