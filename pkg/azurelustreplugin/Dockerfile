@@ -16,11 +16,18 @@ ARG srcImage=ubuntu:22.04
 FROM ${srcImage}
 
 COPY "./_output/azurelustreplugin" "/app/azurelustreplugin"
+COPY "./pkg/azurelustreplugin/useAzureAptMirror.sh" "/app/useAzureAptMirror.sh"
 COPY "./pkg/azurelustreplugin/entrypoint.sh" "/app/entrypoint.sh"
 COPY "./pkg/azurelustreplugin/start.sh" "/app/start.sh"
 COPY "./pkg/azurelustreplugin/readinessProbe.sh" "/app/readinessProbe.sh"
 
-RUN chmod +x "/app/azurelustreplugin" && chmod +x "/app/entrypoint.sh" && chmod +x "/app/start.sh" && chmod +x "/app/readinessProbe.sh"
+RUN chmod +x "/app/azurelustreplugin" \
+  && chmod +x "/app/useAzureAptMirror.sh" \
+  && chmod +x "/app/entrypoint.sh" \
+  && chmod +x "/app/start.sh" \
+  && chmod +x "/app/readinessProbe.sh"
+
+RUN /app/useAzureAptMirror.sh
 
 RUN apt-get update && \
   apt-get upgrade -y && \
@@ -37,7 +44,7 @@ RUN apt-get update && \
 
 WORKDIR "/app"
 
-LABEL maintainers="dabradley;t-mialve"
+LABEL maintainers="dabradley;jeffbearer;t-mialve;"
 LABEL description="Azure Lustre CSI driver"
 
 ENTRYPOINT ["/app/start.sh", "/app/azurelustreplugin"]
