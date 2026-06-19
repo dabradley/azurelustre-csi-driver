@@ -12,40 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG srcImage=ubuntu:22.04
+ARG srcImage=mcr.microsoft.com/azurelinux/base/core:3.0
 FROM ${srcImage}
 
 COPY "./_output/azurelustreplugin" "/app/azurelustreplugin"
-COPY "./pkg/azurelustreplugin/useAzureAptMirror.sh" "/app/useAzureAptMirror.sh"
 COPY "./pkg/azurelustreplugin/entrypoint.sh" "/app/entrypoint.sh"
 COPY "./pkg/azurelustreplugin/start.sh" "/app/start.sh"
 COPY "./pkg/azurelustreplugin/readinessProbe.sh" "/app/readinessProbe.sh"
 
-RUN chmod +x "/app/azurelustreplugin" \
-  && chmod +x "/app/useAzureAptMirror.sh" \
-  && chmod +x "/app/entrypoint.sh" \
-  && chmod +x "/app/start.sh" \
-  && chmod +x "/app/readinessProbe.sh"
+RUN chmod +x "/app/azurelustreplugin" && chmod +x "/app/entrypoint.sh" && chmod +x "/app/start.sh" && chmod +x "/app/readinessProbe.sh"
 
-# Prefer the Ubuntu CDN; keep the Azure mirror as a lower-priority apt fallback.
-RUN /app/useAzureAptMirror.sh
-
-RUN apt-get update && \
-  apt-get upgrade -y && \
-  DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    gpg curl ca-certificates iproute2 kmod && \
-  apt-get autoremove -y && \
-  apt-get clean -y && \
-  rm -rf \
-  /var/cache/debconf/* \
-  /var/lib/apt/lists/* \
-  /var/log/* \
-  /tmp/* \
-  /var/tmp/*
+RUN tdnf -y update && \
+  tdnf install -y \
+    ca-certificates \
+    curl \
+    gawk \
+    iproute \
+    kmod \
+    sed \
+    grep \
+    which && \
+  tdnf clean all && \
+  rm -rf /var/cache/tdnf/*
 
 WORKDIR "/app"
 
-LABEL maintainers="dabradley;jeffbearer;t-mialve;csmuell"
+LABEL maintainers="dabradley;csmuell"
 LABEL description="Azure Lustre CSI driver"
 
 ENTRYPOINT ["/app/start.sh", "/app/azurelustreplugin"]

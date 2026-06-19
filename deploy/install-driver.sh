@@ -119,6 +119,7 @@ kubectl apply -f "${repo}/csi-azurelustre-driver.yaml"
 kubectl apply -f "${repo}/csi-azurelustre-controller.yaml"
 kubectl apply -f "${repo}/csi-azurelustre-node-jammy.yaml"
 kubectl apply -f "${repo}/csi-azurelustre-node-noble.yaml"
+kubectl apply -f "${repo}/csi-azurelustre-node-azurelinux3.yaml"
 
 # Restart node DaemonSet pods only if the ConfigMap state changed.
 # The custom entrypoint ConfigMap is only mounted into node DaemonSets,
@@ -127,9 +128,11 @@ if [[ "${configmap_changed}" == "true" ]]; then
   echo "Custom entrypoint configuration changed, restarting node pods..."
   kubectl rollout restart daemonset csi-azurelustre-node-jammy -n kube-system
   kubectl rollout restart daemonset csi-azurelustre-node-noble -n kube-system
+  kubectl rollout restart daemonset csi-azurelustre-node-azurelinux3 -n kube-system
 fi
 
 kubectl rollout status deployment csi-azurelustre-controller -nkube-system --timeout=300s
 kubectl rollout status daemonset csi-azurelustre-node-jammy -nkube-system --timeout=1800s
 kubectl rollout status daemonset csi-azurelustre-node-noble -nkube-system --timeout=1800s
+kubectl rollout status daemonset csi-azurelustre-node-azurelinux3 -nkube-system --timeout=1800s
 echo 'Azure Lustre CSI driver installed successfully.'

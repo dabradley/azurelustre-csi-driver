@@ -64,8 +64,29 @@ function add_net_interfaces() {
   done
 }
 
+# Detect OS family from container's os-release
+osFamily=""
+if [[ -f /etc/os-release ]]; then
+  # shellcheck disable=SC1091 # /etc/os-release is a runtime file
+  osID=$(. /etc/os-release; echo "${ID:-}")
+  if [[ "${osID}" == "azurelinux" || "${osID}" == "mariner" ]]; then
+    osFamily="azurelinux"
+  elif [[ "${osID}" == "ubuntu" || "${osID}" == "debian" ]]; then
+    osFamily="ubuntu"
+  fi
+fi
+if [[ -z "${osFamily}" ]]; then
+  echo "$(date -u) Error: Unsupported container OS: ${osID:-unknown}. Supported: ubuntu, debian, azurelinux, mariner."
+  exit 1
+fi
+echo "$(date -u) Detected OS family: ${osFamily}"
+
 # Update CA certificates to ensure HTTPS connections work
-update-ca-certificates
+if [[ "${osFamily}" == "azurelinux" ]]; then
+  update-ca-trust
+else
+  update-ca-certificates
+fi
 
 installClientPackages=${AZURELUSTRE_CSI_INSTALL_LUSTRE_CLIENT:-yes}
 echo "installClientPackages: ${installClientPackages}"
@@ -85,92 +106,189 @@ if [[ "${installClientPackages}" == "yes" ]]; then
   requiredClientSha="${CLIENT_SHA_SUFFIX}"
   echo "requiredClientSha: ${requiredClientSha}"
 
-  pkgVersion="${requiredLustreVersion}-${requiredClientSha}"
+  # Construct package version and name (OS-specific naming convention)
+  if [[ "${osFamily}" == "azurelinux" ]]; then
+    # Azure Linux RPM packages use underscores: 2.16.1_21_g153e389
+    pkgVersion="${requiredLustreVersion}_${requiredClientSha//-/_}"
+  else
+    # Ubuntu deb packages use dashes: 2.15.7-33-g79ddf99
+    pkgVersion="${requiredLustreVersion}-${requiredClientSha}"
+  fi
   echo "pkgVersion: ${pkgVersion}"
 
   pkgName="amlfs-lustre-client-${pkgVersion}"
   echo "pkgName: ${pkgName}"
 
-  # shellcheck disable=SC1091,SC2154 # /etc/os-release sets VERSION_CODENAME
-  osReleaseCodeName=$(. /etc/os-release; echo "${VERSION_CODENAME}")
-  if [[ -z "${osReleaseCodeName}" ]]; then
-    echo "Could not determine OS release codename"
-    exit 1
-  fi
-
-  # shellcheck disable=SC1091 # /etc/host-os-release exists only at runtime inside the container
-  if ! grep -q -R "${osReleaseCodeName}" /etc/host-os-release; then
-    # shellcheck disable=SC2031 # intentional: read VERSION_CODENAME in a subshell to avoid polluting the current scope
-    hostCodeName=$(. /etc/host-os-release; echo "${VERSION_CODENAME}")
-    if [[ "${hostCodeName}" == "focal" && "${osReleaseCodeName}" == "jammy" ]]; then
-      echo "Allowing jammy container on focal host, this usage is deprecated and will be removed in future"
-    else
-      echo "Incompatible host OS detected: ${hostCodeName}, expected: ${osReleaseCodeName}"
-      exit 1
-    fi
-  fi
-
   echo "$(date -u) Command line arguments: $*"
 
   kernelVersion=$(uname -r)
 
-  echo "$(date -u) Installing Lustre client packages for OS=${osReleaseCodeName}, kernel=${kernelVersion} "
+  if [[ "${osFamily}" == "azurelinux" ]]; then
+    # ----- Azure Linux path -----
 
-  ARCH=$(uname -m)
-  if [[ "${ARCH}" != "x86_64" && "${ARCH}" != "aarch64" ]]; then
-    echo "$(date -u) Error: Unsupported architecture: ${ARCH}"
-    exit 1
-  fi
-  if [[ "${ARCH}" == "x86_64" ]]; then
-    ARCH="amd64"
-  else
-    ARCH="arm64"
-  fi
-
-  # Use azure.archive.ubuntu.com mirror for package installation
-  /app/useAzureAptMirror.sh
-
-  echo "$(date -u) Adding Microsoft package repository for Lustre client modules, architecture=${ARCH}."
-  curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
-  echo "deb [arch=${ARCH}] https://packages.microsoft.com/repos/amlfs-${osReleaseCodeName}/ ${osReleaseCodeName} main" | tee /etc/apt/sources.list.d/amlfs.list
-  apt-get update
-
-  echo "$(date -u) Installing Lustre client modules: ${pkgName}=${kernelVersion}"
-
-  tries=3
-  sleep_before_retry=15
-  install_success=false
-  while [[ tries -gt 0 ]]; do
-    # grub issue
-    # https://stackoverflow.com/questions/40748363/virtual-machine-apt-get-grub-issue/40751712
-    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::options::="--force-confdef" -o DPkg::options::="--force-confold" \
-      "${pkgName}=${kernelVersion}"; then
-      echo "$(date -u) Error installing Lustre client modules. Will try removing existing versions"
-      # Check if lustre_rmmod is available, attempt to unload the modules if so.
-      # If modules are already uninstalled, this will still pass
-      if type lustre_rmmod >/dev/null 2>&1 && ! lustre_rmmod; then
-        echo "$(date -u) Error: Unable to unload running module. Are there still mounted Lustre filesystems on this node? Old Lustre client version may continue running."
-      fi
-      if existing_versions=$(dpkg-query --showformat=' ${Package}=${Version}' --show '*lustre-client*'); then
-        echo  "$(date -u) The following existing versions of the Lustre client are installed and will be removed:${existing_versions}"
-      fi
-      echo "$(date -u) Uninstalling existing Lustre client versions."
-      apt-get remove --purge -y '*lustre-client*' || true
-      tries=$((tries - 1))
-      sleep "${sleep_before_retry}"
-      sleep_before_retry=$((sleep_before_retry * 2))
-    else
-      install_success=true
-      break
+    # Host OS validation: check ID and major VERSION_ID
+    # shellcheck disable=SC1091 # /etc/os-release is a runtime file
+    containerVersionID=$(. /etc/os-release; echo "${VERSION_ID:-}")
+    # shellcheck disable=SC1091 # /etc/host-os-release is mounted at runtime
+    # shellcheck disable=SC2031 # intentional: read ID in a subshell to avoid polluting the current scope
+    hostID=$(. /etc/host-os-release; echo "${ID:-}")
+    # shellcheck disable=SC1091 # /etc/host-os-release is mounted at runtime
+    # shellcheck disable=SC2031 # intentional: read VERSION_ID in a subshell to avoid polluting the current scope
+    hostVersionID=$(. /etc/host-os-release; echo "${VERSION_ID:-}")
+    if [[ -z "${containerVersionID}" ]]; then
+      echo "Could not determine container OS VERSION_ID from /etc/os-release"
+      exit 1
     fi
-  done
+    if [[ -z "${hostVersionID}" ]]; then
+      echo "Could not determine host OS VERSION_ID from /etc/host-os-release"
+      exit 1
+    fi
+    if [[ "${hostID}" != "azurelinux" && "${hostID}" != "mariner" ]]; then
+      echo "Incompatible host OS detected: ${hostID}, expected: azurelinux"
+      exit 1
+    fi
+    # Compare major version (e.g., "3" from "3.0" or "3.0.20260517")
+    if [[ "${hostVersionID%%.*}" != "${containerVersionID%%.*}" ]]; then
+      echo "Incompatible host OS version: ${hostVersionID}, expected major version: ${containerVersionID%%.*}"
+      exit 1
+    fi
 
-  echo "$(date -u) Install success: ${install_success}, Tries left: ${tries}"
+    echo "$(date -u) Installing Lustre client packages for OS=azurelinux${containerVersionID%%.*}, kernel=${kernelVersion}"
 
-  if ! ${install_success}; then
-    echo "$(date -u) Error: Could not install necessary Lustre drivers for: ${pkgName}=${kernelVersion}"
+    # Repo setup: import GPG key and add yum repo
+    echo "$(date -u) Adding Microsoft package repository for Lustre client modules."
+    rpm --import https://packages.microsoft.com/keys/microsoft.asc
+    cat > /etc/yum.repos.d/amlfs.repo <<REPOEOF
+[amlfs]
+name=Azure Lustre Packages
+baseurl=https://packages.microsoft.com/yumrepos/amlfs-al${containerVersionID%%.*}
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.microsoft.com/keys/microsoft.asc
+REPOEOF
+
+    # Transform kernel version for RPM package name:
+    # e.g. 6.6.139.1-1.azl3.x86_64 -> 6.6.139.1.1.azl3
+    kernelPkgVersion=$(echo "${kernelVersion}" | sed -e "s/\.$(uname -m)$//" | sed -re 's/[-_]/\./g')
+
+    installPkgName="${pkgName}-${kernelPkgVersion}"
+
+    echo "$(date -u) Installing Lustre client modules: ${installPkgName}"
+
+    tries=3
+    sleep_before_retry=15
+    install_success=false
+    while [[ tries -gt 0 ]]; do
+      if ! tdnf install -y --disablerepo="*" --enablerepo="amlfs" --enablerepo="azurelinux-official-base" "${installPkgName}"; then
+        echo "$(date -u) Error installing Lustre client modules. Will try removing existing versions"
+        if type lustre_rmmod >/dev/null 2>&1 && ! lustre_rmmod; then
+          echo "$(date -u) Error: Unable to unload running module. Are there still mounted Lustre filesystems on this node? Old Lustre client version may continue running."
+        fi
+        # Query exact RPM names for logging and removal
+        mapfile -t existing_pkgs < <(rpm -qa '*lustre-client*' 2>/dev/null || true)
+        if [[ ${#existing_pkgs[@]} -gt 0 ]]; then
+          echo "$(date -u) The following existing versions of the Lustre client are installed and will be removed: ${existing_pkgs[*]}"
+          echo "$(date -u) Uninstalling existing Lustre client versions."
+          tdnf remove -y "${existing_pkgs[@]}" || true
+        fi
+        tries=$((tries - 1))
+        sleep "${sleep_before_retry}"
+        sleep_before_retry=$((sleep_before_retry * 2))
+      else
+        install_success=true
+        break
+      fi
+    done
+
+    echo "$(date -u) Install success: ${install_success}, Tries left: ${tries}"
+
+    if ! ${install_success}; then
+      echo "$(date -u) Error: Could not install necessary Lustre drivers for: ${installPkgName}"
+    else
+      echo "$(date -u) Installed Lustre client packages for: ${installPkgName}"
+    fi
+
   else
-    echo "$(date -u) Installed Lustre client packages for: ${pkgName}=${kernelVersion}"
+    # ----- Ubuntu path -----
+
+    # shellcheck disable=SC1091,SC2154 # /etc/os-release sets VERSION_CODENAME
+    osReleaseCodeName=$(. /etc/os-release; echo "${VERSION_CODENAME}")
+    if [[ -z "${osReleaseCodeName}" ]]; then
+      echo "Could not determine OS release codename"
+      exit 1
+    fi
+
+    # shellcheck disable=SC1091 # /etc/host-os-release exists only at runtime inside the container
+    if ! grep -q -R "${osReleaseCodeName}" /etc/host-os-release; then
+      # shellcheck disable=SC2031 # intentional: read VERSION_CODENAME in a subshell to avoid polluting the current scope
+      hostCodeName=$(. /etc/host-os-release; echo "${VERSION_CODENAME}")
+      if [[ "${hostCodeName}" == "focal" && "${osReleaseCodeName}" == "jammy" ]]; then
+        echo "Allowing jammy container on focal host, this usage is deprecated and will be removed in future"
+      else
+        echo "Incompatible host OS detected: ${hostCodeName}, expected: ${osReleaseCodeName}"
+        exit 1
+      fi
+    fi
+
+    echo "$(date -u) Installing Lustre client packages for OS=${osReleaseCodeName}, kernel=${kernelVersion} "
+
+    ARCH=$(uname -m)
+    if [[ "${ARCH}" != "x86_64" && "${ARCH}" != "aarch64" ]]; then
+      echo "$(date -u) Error: Unsupported architecture: ${ARCH}"
+      exit 1
+    fi
+    if [[ "${ARCH}" == "x86_64" ]]; then
+      ARCH="amd64"
+    else
+      ARCH="arm64"
+    fi
+
+    # Prefer the Ubuntu CDN; keep the Azure mirror as a lower-priority apt fallback.
+    /app/useAzureAptMirror.sh
+
+    echo "$(date -u) Adding Microsoft package repository for Lustre client modules, architecture=${ARCH}."
+    curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+    echo "deb [arch=${ARCH}] https://packages.microsoft.com/repos/amlfs-${osReleaseCodeName}/ ${osReleaseCodeName} main" | tee /etc/apt/sources.list.d/amlfs.list
+    apt-get update
+
+    echo "$(date -u) Installing Lustre client modules: ${pkgName}=${kernelVersion}"
+
+    tries=3
+    sleep_before_retry=15
+    install_success=false
+    while [[ tries -gt 0 ]]; do
+      # grub issue
+      # https://stackoverflow.com/questions/40748363/virtual-machine-apt-get-grub-issue/40751712
+      if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o DPkg::options::="--force-confdef" -o DPkg::options::="--force-confold" \
+        "${pkgName}=${kernelVersion}"; then
+        echo "$(date -u) Error installing Lustre client modules. Will try removing existing versions"
+        # Check if lustre_rmmod is available, attempt to unload the modules if so.
+        # If modules are already uninstalled, this will still pass
+        if type lustre_rmmod >/dev/null 2>&1 && ! lustre_rmmod; then
+          echo "$(date -u) Error: Unable to unload running module. Are there still mounted Lustre filesystems on this node? Old Lustre client version may continue running."
+        fi
+        if existing_versions=$(dpkg-query --showformat=' ${Package}=${Version}' --show '*lustre-client*'); then
+          echo  "$(date -u) The following existing versions of the Lustre client are installed and will be removed:${existing_versions}"
+        fi
+        echo "$(date -u) Uninstalling existing Lustre client versions."
+        apt-get remove --purge -y '*lustre-client*' || true
+        tries=$((tries - 1))
+        sleep "${sleep_before_retry}"
+        sleep_before_retry=$((sleep_before_retry * 2))
+      else
+        install_success=true
+        break
+      fi
+    done
+
+    echo "$(date -u) Install success: ${install_success}, Tries left: ${tries}"
+
+    if ! ${install_success}; then
+      echo "$(date -u) Error: Could not install necessary Lustre drivers for: ${pkgName}=${kernelVersion}"
+    else
+      echo "$(date -u) Installed Lustre client packages for: ${pkgName}=${kernelVersion}"
+    fi
+
   fi
 
   init_lnet="true"

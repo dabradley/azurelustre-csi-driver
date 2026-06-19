@@ -62,6 +62,7 @@ reset_csi_driver () {
     kubectl delete -f "${REPO_ROOT_PATH}"/deploy/csi-azurelustre-controller.yaml --ignore-not-found
     kubectl delete -f "${REPO_ROOT_PATH}"/deploy/csi-azurelustre-node-jammy.yaml --ignore-not-found
     kubectl delete -f "${REPO_ROOT_PATH}"/deploy/csi-azurelustre-node-noble.yaml --ignore-not-found
+    kubectl delete -f "${REPO_ROOT_PATH}"/deploy/csi-azurelustre-node-azurelinux3.yaml --ignore-not-found
     kubectl wait pod -n kube-system --for=delete --selector='app in (csi-azurelustre-controller,csi-azurelustre-node)' --timeout=600s
 
 
@@ -77,11 +78,13 @@ reset_csi_driver () {
     kubectl apply -f "${REPO_ROOT_PATH}"/deploy/csi-azurelustre-controller.yaml
     kubectl apply -f "${REPO_ROOT_PATH}"/deploy/csi-azurelustre-node-jammy.yaml
     kubectl apply -f "${REPO_ROOT_PATH}"/deploy/csi-azurelustre-node-noble.yaml
+    kubectl apply -f "${REPO_ROOT_PATH}"/deploy/csi-azurelustre-node-azurelinux3.yaml
 
     # Wait for new generation of pods to roll out (avoids racing on stale pod snapshots)
     kubectl rollout status -n kube-system deployment/csi-azurelustre-controller --timeout=600s
     kubectl rollout status -n kube-system daemonset/csi-azurelustre-node-jammy --timeout=600s
     kubectl rollout status -n kube-system daemonset/csi-azurelustre-node-noble --timeout=600s
+    kubectl rollout status -n kube-system daemonset/csi-azurelustre-node-azurelinux3 --timeout=600s
 }
 
 get_worker_node_num () {

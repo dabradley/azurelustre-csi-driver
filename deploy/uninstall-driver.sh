@@ -26,6 +26,7 @@ echo "Uninstalling Azure Lustre CSI driver, repo: ${repo} ..."
 kubectl delete -f "${repo}"/csi-azurelustre-controller.yaml --ignore-not-found
 kubectl delete -f "${repo}"/csi-azurelustre-node-jammy.yaml --ignore-not-found
 kubectl delete -f "${repo}"/csi-azurelustre-node-noble.yaml --ignore-not-found
+kubectl delete -f "${repo}"/csi-azurelustre-node-azurelinux3.yaml --ignore-not-found
 kubectl delete -f "${repo}"/csi-azurelustre-driver.yaml --ignore-not-found
 kubectl delete -f "${repo}"/rbac-csi-azurelustre-controller.yaml --ignore-not-found
 kubectl delete -f "${repo}"/rbac-csi-azurelustre-node.yaml --ignore-not-found

@@ -29,6 +29,7 @@ function print_versions () {
 	kubectl rollout status -n kube-system deployment/csi-azurelustre-controller --timeout=600s
 	kubectl rollout status -n kube-system daemonset/csi-azurelustre-node-jammy --timeout=600s
 	kubectl rollout status -n kube-system daemonset/csi-azurelustre-node-noble --timeout=600s
+	kubectl rollout status -n kube-system daemonset/csi-azurelustre-node-azurelinux3 --timeout=600s
 
 	# shellcheck disable=SC2154 # ResourceGroup, ClusterName, PoolName are expected env vars from start-long-haul.sh
 	nodepool=$(az aks nodepool show --resource-group "${ResourceGroup}" --cluster-name "${ClusterName}" --nodepool-name "${PoolName}")
@@ -43,7 +44,17 @@ function print_versions () {
 	podName=$(kubectl get pods -n kube-system -l app=csi-azurelustre-node -o wide --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp | grep "${PoolName}" | awk '{print $1}' | head -n 1)
 	echo "Get kernel version and Lustre module version from pod ${podName}"
 	kernelVersion=$(kubectl exec -n kube-system -it "${podName}" -c azurelustre -- /bin/bash -c "uname -r")
-	module=$(kubectl exec -n kube-system -it "${podName}" -c azurelustre -- /bin/bash -c "dpkg-query -f '\${Package}|\${Version}' -W kmod-lustre-client-*")
+	# Detect OS family to use the right package query
+	osID=$(kubectl exec -n kube-system -it "${podName}" -c azurelustre -- /bin/bash -c ". /etc/os-release; echo \${ID:-}")
+	osID=$(echo "${osID}" | tr -d '[:space:]')
+	if [[ "${osID}" == "azurelinux" || "${osID}" == "mariner" ]]; then
+		# Prefer the kmod module package (parity with the Ubuntu branch); fall back to
+		# the amlfs metapackage only if no kmod package is installed. Querying both
+		# patterns together would let head -n 1 nondeterministically pick the metapackage.
+		module=$(kubectl exec -n kube-system -it "${podName}" -c azurelustre -- /bin/bash -c "m=\$(rpm -qa 'kmod-lustre-client-*' --queryformat '%{NAME}|%{VERSION}\n' | head -n 1); [[ -z \"\${m}\" ]] && m=\$(rpm -qa 'amlfs-lustre-client-*' --queryformat '%{NAME}|%{VERSION}\n' | head -n 1); echo \"\${m}\"")
+	else
+		module=$(kubectl exec -n kube-system -it "${podName}" -c azurelustre -- /bin/bash -c "dpkg-query -f '\${Package}|\${Version}' -W kmod-lustre-client-*")
+	fi
 	modulePkgName=${module%|*}
 	modulePkgVersion=${module#*|}
 
@@ -101,6 +112,7 @@ print_logs_title "Start and verify sample workload"
 kubectl rollout status -n kube-system deployment/csi-azurelustre-controller --timeout=600s
 kubectl rollout status -n kube-system daemonset/csi-azurelustre-node-jammy --timeout=600s
 kubectl rollout status -n kube-system daemonset/csi-azurelustre-node-noble --timeout=600s
+kubectl rollout status -n kube-system daemonset/csi-azurelustre-node-azurelinux3 --timeout=600s
 
 start_sample_workload
 
