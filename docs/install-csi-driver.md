@@ -37,6 +37,59 @@ This document explains how to install Azure Lustre CSI driver on a kubernetes cl
     csi-azurelustre-node-g6sfx   3/3     Running   0          30s
     ```
 
+## Supported node operating systems
+
+The CSI driver runs as OS-specific node DaemonSets, each scheduled onto nodes by a `nodeSelector` or node-affinity match on the `kubernetes.azure.com/os-sku-effective` label. Only the following node OS SKUs are supported:
+
+| `os-sku-effective` | Node DaemonSet | Image flavor |
+| ------------------ | -------------- | ------------ |
+| `Ubuntu2204` | `csi-azurelustre-node-jammy` | `-jammy` |
+| `Ubuntu2004` | `csi-azurelustre-node-jammy` | `-jammy` |
+| `Ubuntu2404` | `csi-azurelustre-node-noble` | `-noble` |
+| `AzureLinux3` | `csi-azurelustre-node-azurelinux3` | `-azurelinux3` |
+
+(`Ubuntu2004` is matched by the Jammy DaemonSet as a **deprecated** bridge for legacy CVM nodes still on Ubuntu 20.04 (focal). The entrypoint allows the jammy container on a focal host but logs that this is deprecated and will be removed in a future release.)
+
+> [!IMPORTANT]
+> A node whose `os-sku-effective` value is **not** listed above matches **no** DaemonSet, so it **silently receives no CSI driver pod** (there is no catch-all DaemonSet). Lustre volumes scheduled onto that node fail to mount with no obvious driver error -- there is simply no driver present on the node. Check a node's value with:
+>
+> ```shell
+> kubectl get node <node-name> -o jsonpath='{.metadata.labels.kubernetes\.azure\.com/os-sku-effective}'
+> ```
+>
+> See the [CSI Driver Troubleshooting Guide](csi-debug.md) for `os-sku-effective` troubleshooting steps.
+
+### Karpenter and node auto-provisioning
+
+AKS clusters with [node auto-provisioning (NAP)](https://learn.microsoft.com/azure/aks/node-auto-provisioning) enabled use managed Karpenter to add nodes dynamically based on pending pods. The AKS platform does **not** enforce OS/SKU compatibility for auto-provisioned nodes, so an unconstrained `NodePool` may create nodes with an OS SKU that matches none of the DaemonSets above -- producing nodes with no CSI driver pod and silent mount failures.
+
+If you enable NAP, constrain every `NodePool` that can host Lustre workloads to the supported OS SKUs. Use the `kubernetes.azure.com/os-sku` and `kubernetes.io/arch` requirements (NAP evaluates all NodePools and works best when they are mutually exclusive):
+
+```yaml
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: lustre-supported
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        name: default            # your AKSNodeClass
+      requirements:
+        # Limit to OS SKUs the CSI driver supports.
+        - key: kubernetes.azure.com/os-sku
+          operator: In
+          values: ["Ubuntu", "AzureLinux"]
+        # The driver's Azure Linux image is amd64-only; pin amd64 unless you only
+        # run Ubuntu Noble, the one flavor that also ships an arm64 image.
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+```
+
+> [!NOTE]
+> `kubernetes.azure.com/os-sku` is coarse (`Ubuntu` or `AzureLinux`); the resulting `os-sku-effective` version (`Ubuntu2204`/`Ubuntu2404`, or `AzureLinux3`) depends on your cluster's Kubernetes/AKS version. Azure Linux resolves to **Azure Linux 3** only on AKS versions where AL3 is the default -- older clusters may provision the unsupported Azure Linux 2. Confirm every provisioned node resolves to a supported `os-sku-effective` value (`Ubuntu2204`, `Ubuntu2004`, `Ubuntu2404`, or `AzureLinux3`).
+
 ## Verifying CSI Driver Readiness for Lustre Operations
 
 Before mounting Azure Lustre filesystems, it is important to verify that the CSI driver nodes are fully initialized and ready for Lustre operations. The driver includes enhanced LNet validation that performs comprehensive readiness checks:
@@ -138,5 +191,5 @@ This deletes the ConfigMap and restarts the node pods to use the built-in entryp
 - The custom entrypoint replaces the **entire** built-in entrypoint, including Lustre client installation logic. Your custom script is responsible for any required setup before launching the CSI driver binary.
 - A good starting point for a custom entrypoint is the built-in script at `pkg/azurelustreplugin/entrypoint.sh`.
 - **Security note:** the custom entrypoint is stored in the `csi-azurelustre-entrypoint` ConfigMap in `kube-system` and is executed by a privileged container. Treat this as a code-injection path: tightly restrict RBAC for creating or updating this ConfigMap, and only use custom entrypoints in trusted/admin scenarios.
-- If you edit the ConfigMap directly (e.g., `kubectl edit configmap csi-azurelustre-entrypoint -n kube-system`), you must manually restart the node DaemonSets for changes to take effect: `kubectl rollout restart daemonset csi-azurelustre-node-jammy csi-azurelustre-node-noble -n kube-system`
+- If you edit the ConfigMap directly (e.g., `kubectl edit configmap csi-azurelustre-entrypoint -n kube-system`), you must manually restart the node DaemonSets for changes to take effect: `kubectl rollout restart daemonset csi-azurelustre-node-jammy csi-azurelustre-node-noble csi-azurelustre-node-azurelinux3 -n kube-system`
 - The uninstall script automatically cleans up the ConfigMap if it exists.

@@ -2,19 +2,20 @@
 
 ## Overview
 
-This directory contains distribution-specific DaemonSet deployments for the Azure Lustre CSI driver. Each deployment targets a specific Ubuntu version to ensure proper Lustre client compatibility.
+This directory contains distribution-specific DaemonSet deployments for the Azure Lustre CSI driver. Each deployment targets a specific OS version to ensure proper Lustre client compatibility.
 
 ## Files
 
 - `csi-azurelustre-node-jammy.yaml` - Ubuntu 22.04 (Jammy) nodes
 - `csi-azurelustre-node-noble.yaml` - Ubuntu 24.04 (Noble) nodes
+- `csi-azurelustre-node-azurelinux3.yaml` - Azure Linux 3 nodes
 
 ## Distribution Targeting
 
 Each deployment uses:
 
 1. **Node Targeting**: Uses node affinity and selectors to match correct node OS flavors
-2. **Container Image**: Version-specific image tags like `v0.4.0-jammy`, `v0.4.0-noble`
+2. **Container Image**: Version-specific image tags like `v0.4.0-jammy`, `v0.4.0-noble`, `v0.4.0-azurelinux3`
 3. **Unique Names**: Each DaemonSet has a unique name (`csi-azurelustre-node-jammy`) to prevent conflicts
 
 ## Installation
@@ -36,6 +37,7 @@ Your AKS cluster nodes must have the `kubernetes.azure.com/os-sku-effective` lab
 
 - `Ubuntu2204`
 - `Ubuntu2404`
+- `AzureLinux3`
 
 AKS automatically sets this label based on the node pool's OS configuration.
 
@@ -45,8 +47,11 @@ Container images follow the pattern:
 
 - `mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-jammy`
 - `mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-noble`
+- `mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.4.0-azurelinux3`
 
-Each image contains an Ubuntu version capable of installing the Lustre client packages compiled for the target distribution.
+Ubuntu images use `apt-get` to install Lustre client deb packages. The Azure Linux 3 image
+uses `tdnf` to install Lustre client RPM packages. Both use the same `amlfs-lustre-client-*`
+metapackage to keep kernel modules and userspace tools in sync.
 
 ## Troubleshooting
 
@@ -61,4 +66,5 @@ To check DaemonSet pod distribution:
 ```bash
 kubectl get pods -n kube-system -l app=csi-azurelustre-node,flavor=jammy -o wide
 kubectl get pods -n kube-system -l app=csi-azurelustre-node,flavor=noble -o wide
+kubectl get pods -n kube-system -l app=csi-azurelustre-node,flavor=azurelinux3 -o wide
 ```
