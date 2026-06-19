@@ -135,9 +135,9 @@ spec:
             - name: AZURELUSTRE_CSI_INSTALL_LUSTRE_CLIENT
               value: "yes"
             - name: LUSTRE_VERSION
-              value: "2.16.1"
+              value: "2.17.0"
             - name: CLIENT_SHA_SUFFIX
-              value: "14-gbc76088"
+              value: "19-gbb5310f"
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
