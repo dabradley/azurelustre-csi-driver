@@ -2,7 +2,7 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: csi-azurelustre-node-noble
+  name: csi-azurelustre-node-azurelinux3
   namespace: kube-system
 spec:
   updateStrategy:
@@ -12,19 +12,20 @@ spec:
   selector:
     matchLabels:
       app: csi-azurelustre-node
-      flavor: noble
+      flavor: azurelinux3
   template:
     metadata:
       labels:
         app: csi-azurelustre-node
-        flavor: noble
+        flavor: azurelinux3
     spec:
       hostNetwork: true
       dnsPolicy: Default
       serviceAccountName: csi-azurelustre-node-sa
       nodeSelector:
         kubernetes.io/os: linux
-        kubernetes.azure.com/os-sku-effective: Ubuntu2404
+        kubernetes.io/arch: amd64
+        kubernetes.azure.com/os-sku-effective: AzureLinux3
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -87,7 +88,7 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: azurelustre
-          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:latest-noble
+          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:latest-azurelinux3
           imagePullPolicy: Always
           lifecycle:
             preStop:
@@ -163,7 +164,11 @@ spec:
           resources:
             limits:
               cpu: 1
-              memory: 200Mi
+              # Azure Linux 3 needs more memory than Ubuntu (200Mi) during startup.
+              # The tdnf/RPM install runs depmod which loads the full kernel symbol
+              # map (7.5MB) and scans ~1100 modules to rebuild dependencies.
+              # Steady-state usage is ~45Mi; the spike is transient (~10s).
+              memory: 500Mi
             requests:
               cpu: 10m
               memory: 20Mi

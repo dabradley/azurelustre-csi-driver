@@ -174,7 +174,7 @@ kubectl get events --field-selector involvedObject.name=<csi-azurelustre-node-po
 
 ## OS-Specific DaemonSet Issues
 
-The Azure Lustre CSI driver uses distribution-specific DaemonSets to ensure proper Lustre client compatibility across different Ubuntu versions. Each DaemonSet targets specific node OS versions using node selectors and affinity rules.
+The Azure Lustre CSI driver uses distribution-specific DaemonSets to ensure proper Lustre client compatibility across different OS versions. Each DaemonSet targets specific node OS versions using node selectors and affinity rules.
 
 ### No CSI Driver Pods on Nodes
 
@@ -198,13 +198,14 @@ Expected output:
 NAME                                OS-SKU
 aks-nodepool1-12345678-vmss000000  Ubuntu2204
 aks-nodepool2-23456789-vmss000001  Ubuntu2404
+aks-nodepool3-34567890-vmss000002  AzureLinux3
 ```
 
 **Possible Causes:**
 
 - Node OS version doesn't match any DaemonSet selector
 - Missing or incorrect `kubernetes.azure.com/os-sku-effective` label
-- Unsupported Ubuntu version
+- Unsupported OS version (supported: Ubuntu 22.04, Ubuntu 24.04, Azure Linux 3)
 - Node labels were manually modified or are missing
 
 **Debugging Steps:**
@@ -219,6 +220,7 @@ kubectl get daemonsets -n kube-system -l app=csi-azurelustre-node
 # Check DaemonSet desired vs ready counts
 kubectl get ds -n kube-system csi-azurelustre-node-jammy
 kubectl get ds -n kube-system csi-azurelustre-node-noble
+kubectl get ds -n kube-system csi-azurelustre-node-azurelinux3
 
 # Inspect node labels in detail
 kubectl get node <node-name> --show-labels | grep os-sku-effective
@@ -254,6 +256,7 @@ kubectl get events -n kube-system --field-selector involvedObject.kind=DaemonSet
                  values:
                    - Ubuntu2204
                    - Ubuntu2004
+                   - AzureLinux3
                    - <your-custom-label-value>
    ```
 
@@ -273,9 +276,9 @@ kubectl get events -n kube-system --field-selector involvedObject.kind=DaemonSet
 
    Versions prior to v0.4.0 used a single DaemonSet without OS-specific targeting, which conflicts with the new distribution-specific architecture.
 
-3. **For unsupported Ubuntu versions:**
+3. **For unsupported OS versions:**
 
-   - Upgrade node pool to Ubuntu 22.04 or 24.04 (CVMs are supported with 20.04)
+   - Upgrade node pool to Ubuntu 22.04, Ubuntu 24.04, or Azure Linux 3
    - Create a new node pool with a supported OS version
    - Migrate workloads to supported nodes
 
@@ -286,7 +289,7 @@ kubectl get events -n kube-system --field-selector involvedObject.kind=DaemonSet
 **Symptoms:**
 
 - A single node has multiple CSI driver pods running simultaneously
-- Multiple DaemonSet pods from different flavors (jammy/noble) on the same node
+- Multiple DaemonSet pods from different flavors (jammy/noble/azurelinux3) on the same node
 - Unexpected behavior or conflicts during volume mounting
 - Resource contention on nodes
 
@@ -318,6 +321,7 @@ kubectl get node <node-name> -o jsonpath='{.metadata.labels}' | jq
 # Inspect DaemonSet node affinity rules
 kubectl get ds -n kube-system csi-azurelustre-node-jammy -o yaml | grep -A20 affinity
 kubectl get ds -n kube-system csi-azurelustre-node-noble -o yaml | grep -A20 affinity
+kubectl get ds -n kube-system csi-azurelustre-node-azurelinux3 -o yaml | grep -A20 affinity
 
 # Check for pods that should not be on a node
 kubectl describe pod -n kube-system <duplicate-pod-name> | grep -A10 "Node-Selectors\|Node Affinity"
@@ -408,6 +412,7 @@ Look for error messages like:
 # Verify image tags in DaemonSets
 kubectl get ds -n kube-system csi-azurelustre-node-jammy -o jsonpath='{.spec.template.spec.containers[?(@.name=="azurelustre")].image}'
 kubectl get ds -n kube-system csi-azurelustre-node-noble -o jsonpath='{.spec.template.spec.containers[?(@.name=="azurelustre")].image}'
+kubectl get ds -n kube-system csi-azurelustre-node-azurelinux3 -o jsonpath='{.spec.template.spec.containers[?(@.name=="azurelustre")].image}'
 
 # Check image pull secrets
 kubectl get serviceaccount -n kube-system csi-azurelustre-node-sa -o yaml
@@ -430,7 +435,7 @@ kubectl debug node/<node-name> -it --image=ubuntu -- bash
 2. **Use correct image tags:**
 
    - Ensure DaemonSet manifests use existing image tags
-   - Verify `-jammy` and `-noble` suffixes match available images
+   - Verify `-jammy`, `-noble`, and `-azurelinux3` suffixes match available images
    - Update to a known working version if needed
 
 3. **Fix network/registry access:**
@@ -459,12 +464,13 @@ kubectl get pods -n kube-system -l app=csi-azurelustre-node -o jsonpath='{range 
 # Check DaemonSet specifications
 kubectl get ds -n kube-system csi-azurelustre-node-jammy -o jsonpath='{.spec.template.spec.containers[?(@.name=="azurelustre")].image}'
 kubectl get ds -n kube-system csi-azurelustre-node-noble -o jsonpath='{.spec.template.spec.containers[?(@.name=="azurelustre")].image}'
+kubectl get ds -n kube-system csi-azurelustre-node-azurelinux3 -o jsonpath='{.spec.template.spec.containers[?(@.name=="azurelustre")].image}'
 ```
 
 **Possible Causes:**
 
 - DaemonSet update in progress (rolling update)
-- Different image tags configured for jammy vs noble DaemonSets
+- Different image tags configured for jammy, noble, or azurelinux3 DaemonSets
 - Failed DaemonSet updates leaving some pods on old versions
 - Manual pod restarts using different images
 
@@ -474,6 +480,7 @@ kubectl get ds -n kube-system csi-azurelustre-node-noble -o jsonpath='{.spec.tem
 # Check DaemonSet rollout status
 kubectl rollout status ds/csi-azurelustre-node-jammy -n kube-system
 kubectl rollout status ds/csi-azurelustre-node-noble -n kube-system
+kubectl rollout status ds/csi-azurelustre-node-azurelinux3 -n kube-system
 
 # Check for stuck rollouts
 kubectl get ds -n kube-system -l app=csi-azurelustre-node -o wide
@@ -481,6 +488,7 @@ kubectl get ds -n kube-system -l app=csi-azurelustre-node -o wide
 # Review DaemonSet update history
 kubectl rollout history ds/csi-azurelustre-node-jammy -n kube-system
 kubectl rollout history ds/csi-azurelustre-node-noble -n kube-system
+kubectl rollout history ds/csi-azurelustre-node-azurelinux3 -n kube-system
 
 # Check pod ages to identify old pods
 kubectl get pods -n kube-system -l app=csi-azurelustre-node -o custom-columns=NAME:.metadata.name,AGE:.metadata.creationTimestamp,IMAGE:.spec.containers[0].image
@@ -494,6 +502,7 @@ kubectl get pods -n kube-system -l app=csi-azurelustre-node -o custom-columns=NA
    # Wait for rollout to complete
    kubectl rollout status ds/csi-azurelustre-node-jammy -n kube-system --timeout=10m
    kubectl rollout status ds/csi-azurelustre-node-noble -n kube-system --timeout=10m
+   kubectl rollout status ds/csi-azurelustre-node-azurelinux3 -n kube-system --timeout=10m
    ```
 
 2. **Force pod recreation if stuck:**
@@ -508,6 +517,7 @@ kubectl get pods -n kube-system -l app=csi-azurelustre-node -o custom-columns=NA
    Ensure both DaemonSets use the same base version (only differing by OS suffix):
    - Jammy: `v0.4.0-jammy`
    - Noble: `v0.4.0-noble`
+   - Azure Linux 3: `v0.4.0-azurelinux3`
 
    Both should share the same version number (`v0.4.0` in this example).
 
@@ -557,6 +567,7 @@ kubectl get pods -n kube-system -l app=csi-azurelustre-node -o custom-columns=NA
 echo "Total nodes: $(kubectl get nodes --no-headers | wc -l)"
 echo "Jammy pods: $(kubectl get pods -n kube-system -l app=csi-azurelustre-node,flavor=jammy --no-headers | wc -l)"
 echo "Noble pods: $(kubectl get pods -n kube-system -l app=csi-azurelustre-node,flavor=noble --no-headers | wc -l)"
+echo "AzureLinux3 pods: $(kubectl get pods -n kube-system -l app=csi-azurelustre-node,flavor=azurelinux3 --no-headers | wc -l)"
 
 # List nodes without CSI driver pods
 comm -23 \
@@ -608,6 +619,7 @@ kubectl logs -n kube-system -l component=kube-controller-manager | grep -i daemo
    # If DaemonSet is missing or corrupted, redeploy
    kubectl apply -f deploy/csi-azurelustre-node-jammy.yaml
    kubectl apply -f deploy/csi-azurelustre-node-noble.yaml
+   kubectl apply -f deploy/csi-azurelustre-node-azurelinux3.yaml
    ```
 
 3. **Force pod creation if needed:**

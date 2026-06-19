@@ -51,14 +51,22 @@ endif
 # To add a new flavor:
 #   1. Add its name to AMD64_ONLY_FLAVORS or ALL_ARCHES_FLAVORS below.
 #   2. Define SRC_IMAGE_<flavor>.
-#   3. Add the matching files in deploy/, charts/, dalec/ (no Makefile changes).
+#   3. Add the matching files in deploy/, charts/, dalec/.
+#   4. If the shared Dockerfile is not suitable, define DOCKERFILE_<flavor>
+#      to point at a flavor-specific Dockerfile (see DOCKERFILE_azurelinux3).
 
-AMD64_ONLY_FLAVORS := jammy
+AMD64_ONLY_FLAVORS := jammy azurelinux3
 ALL_ARCHES_FLAVORS := noble
 ALL_FLAVORS := $(AMD64_ONLY_FLAVORS) $(ALL_ARCHES_FLAVORS)
 
 SRC_IMAGE_jammy := ubuntu:22.04
 SRC_IMAGE_noble := ubuntu:24.04
+SRC_IMAGE_azurelinux3 := mcr.microsoft.com/azurelinux/base/core:3.0
+
+# Per-flavor Dockerfile override. Defaults to the shared Dockerfile.
+DOCKERFILE = ./pkg/azurelustreplugin/Dockerfile
+DOCKERFILE_azurelinux3 = ./pkg/azurelustreplugin/Dockerfile.azurelinux3
+dockerfile-for = $(or $(DOCKERFILE_$1),$(DOCKERFILE))
 
 # Fail fast if any declared flavor is missing its SRC_IMAGE_<flavor>.
 # Without this, a missing var would silently expand to empty and the Dockerfile's
@@ -163,7 +171,7 @@ check-flavor = $(if $(filter $1,$(FLAVORS)),,$(error '$1' is not a known flavor 
 
 docker-build-%: FORCE
 	$(call check-flavor,$*)
-	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-$* --build-arg srcImage=$(SRC_IMAGE_$*) --output=type=docker -f ./pkg/azurelustreplugin/Dockerfile .
+	docker build --platform=linux/$(ARCH) -t $(IMAGE_TAG)-$* --build-arg srcImage=$(SRC_IMAGE_$*) --output=type=docker -f $(call dockerfile-for,$*) .
 
 .PHONY: push
 push: $(addprefix push-,$(FLAVORS))
