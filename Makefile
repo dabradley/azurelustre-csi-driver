@@ -129,6 +129,17 @@ azurelustre:
 azurelustre-dalec:
 	GOOS=linux go build -a -trimpath -ldflags ${LDFLAGS} -mod vendor -o /app/azurelustreplugin ./pkg/azurelustreplugin
 
+# Opt-in build matching the production crypto path. GOEXPERIMENT=systemcrypto
+# routes Go's crypto through host OpenSSL (FIPS-compliant), exactly like the
+# packaged DALEC build. REQUIRES the Microsoft Go toolchain (msft-golang) on
+# PATH -- stock upstream Go errors on this GOEXPERIMENT. OpenSSL (libssl3) must
+# be present at runtime; it is loaded via dlopen, so no OpenSSL dev headers are
+# needed at build time. Used by the systemcrypto CI lane and for reproducing
+# FIPS-only issues locally.
+.PHONY: azurelustre-systemcrypto
+azurelustre-systemcrypto:
+	GOOS=linux GOARCH=$(ARCH) GOEXPERIMENT=systemcrypto CGO_ENABLED=1 go build -trimpath -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
+
 #
 # Azure Lustre: Docker build / tag / push
 #

@@ -24,6 +24,18 @@ make azurelustre
 
 &nbsp;
 
+- (Optional) Build with the production crypto path (systemcrypto)
+
+The released driver builds with `GOEXPERIMENT=systemcrypto` (FIPS-compliant host OpenSSL) via the Microsoft Go toolchain. To reproduce that build locally — e.g. to debug a FIPS-only issue — install the Microsoft Go toolchain (`msft-golang`) and run:
+
+```sh
+make azurelustre-systemcrypto
+```
+
+This target requires `msft-golang` on `PATH`; stock upstream Go cannot build it (it errors on the `systemcrypto` GOEXPERIMENT). The same target runs pre-merge in the `Systemcrypto Build and Test` CI lane across the shipped flavors (jammy, noble, azurelinux3) and architectures.
+
+&nbsp;
+
 - Run verification before sending PR
 
 ```sh

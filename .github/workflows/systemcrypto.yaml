@@ -1,0 +1,192 @@
+---
+name: Systemcrypto Build and Test
+
+# Builds and tests the driver against the production crypto path
+# (GOEXPERIMENT=systemcrypto, FIPS provider via the Microsoft Go toolchain)
+# across the shipped flavors and architectures (jammy/amd64, noble/amd64,
+# noble/arm64, azurelinux3/amd64). This is the only pre-merge coverage of the
+# FIPS build: the DALEC packaging build runs post-merge against a pinned commit
+# and only checks file permissions, not behavior. The crypto provider differs
+# by flavor -- Ubuntu uses OpenSSL (libssl3); Azure Linux 3 uses
+# SymCrypt-OpenSSL -- so each flavor exercises a distinct runtime stack.
+on:
+  pull_request:
+    branches: [main, development]
+  push:
+    branches: [main, development]
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flavor-drift-guard:
+    name: Flavor list drift guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Assert the Makefile flavor list matches this workflow
+        run: |
+          set -euo pipefail
+          # `make print-all-flavors` is arch-independent ($(ALL_FLAVORS)). Keep
+          # the expected list in sync with the ubuntu + azurelinux3 job matrices
+          # below.
+          expected="azurelinux3 jammy noble"
+          actual="$(make print-all-flavors | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ *$//')"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "::error::Makefile flavors '${actual}' != workflow '${expected}'. Update the systemcrypto.yaml matrices to match." >&2
+            exit 1
+          fi
+
+  ubuntu:
+    name: systemcrypto ${{ matrix.flavor }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: jammy
+            arch: amd64
+            runner: ubuntu-22.04
+            pmc_release: "22.04"
+            pmc_codename: jammy
+          - flavor: noble
+            arch: amd64
+            runner: ubuntu-24.04
+            pmc_release: "24.04"
+            pmc_codename: noble
+          - flavor: noble
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            pmc_release: "24.04"
+            pmc_codename: noble
+    env:
+      # Applied to every step so the build AND the test runs exercise the
+      # OpenSSL-backed crypto path, matching production.
+      GOEXPERIMENT: systemcrypto
+      CGO_ENABLED: "1"
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Microsoft Go toolchain (msft-golang)
+        run: |
+          set -euo pipefail
+          # Pin msft-golang to the go.mod minor; the unconstrained package can
+          # be a newer major.
+          minor="$(grep -E '^go [0-9]' go.mod | sed -E 's/^go ([0-9]+\.[0-9]+).*/\1/')"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates curl gpg
+          curl -sSLf https://packages.microsoft.com/keys/microsoft.asc \
+            | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/microsoft.gpg
+          echo "deb [arch=${{ matrix.arch }} signed-by=/etc/apt/trusted.gpg.d/microsoft.gpg] https://packages.microsoft.com/ubuntu/${{ matrix.pmc_release }}/prod ${{ matrix.pmc_codename }} main" \
+            | sudo tee /etc/apt/sources.list.d/microsoft-prod.list
+          printf 'Package: msft-golang\nPin: version %s.*\nPin-Priority: 1001\n' "$minor" \
+            | sudo tee /etc/apt/preferences.d/msft-golang.pref
+          sudo apt-get update
+          sudo apt-get install -y msft-golang
+
+      - name: Confirm systemcrypto toolchain is active
+        run: |
+          set -euo pipefail
+          minor="$(grep -E '^go [0-9]' go.mod | sed -E 's/^go ([0-9]+\.[0-9]+).*/\1/')"
+          go version
+          go version | grep -qF "go${minor}."
+          # Fail loud if the experiment is not honored, so a silent fallback to
+          # standard Go crypto cannot pass as "systemcrypto tested".
+          go env GOEXPERIMENT | tr ',' '\n' | grep -qx systemcrypto
+
+      - name: Build (systemcrypto)
+        run: make azurelustre-systemcrypto ARCH=${{ matrix.arch }}
+
+      - name: Smoke-test built binary (exercises crypto dlopen at startup)
+        run: ./_output/azurelustreplugin --version
+
+      - name: Unit tests (systemcrypto)
+        run: make unit-test
+
+      - name: Sanity tests (systemcrypto)
+        run: make sanity-test-local
+
+  azurelinux3:
+    name: systemcrypto azurelinux3/amd64
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/azurelinux/base/core:3.0
+    timeout-minutes: 30
+    env:
+      GOEXPERIMENT: systemcrypto
+      CGO_ENABLED: "1"
+      # Container jobs bind-mount HOME to /github/home, moving GnuPG's keyring
+      # off /root/.gnupg where the PMC repo key was imported -- which breaks
+      # tdnf's repogpgcheck signature verification. Point gpg back at the
+      # populated keyring. https://github.com/microsoft/azurelinux/issues/2812
+      GNUPGHOME: /root/.gnupg
+    steps:
+      - name: Install build prerequisites (tdnf)
+        # The azurelinux3 base image has no bash, git or tar; install the build
+        # and checkout prerequisites first (checkout needs git and tar).
+        # Bootstrap under POSIX sh. SymCrypt + SymCrypt-OpenSSL are the AL3 FIPS
+        # provider stack; golang is pinned from go.mod after checkout.
+        shell: sh
+        run: |
+          set -eu
+          tdnf -y update
+          tdnf -y install \
+            bash ca-certificates git make tar gzip gcc glibc-devel binutils \
+            kernel-headers openssl-libs SymCrypt SymCrypt-OpenSSL
+
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Trust the workspace for git
+        # Container jobs run as root over a host-owned bind mount, so git flags
+        # the repo as "dubious ownership" and `go build` VCS stamping fails.
+        # checkout's own safe.directory lives in a temp config it deletes, so it
+        # never reaches later steps. https://github.com/actions/checkout/issues/766
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install Microsoft Go pinned to go.mod (tdnf)
+        # Pin golang to the go.mod minor; the unconstrained package is newer.
+        # Metadata is already cached from the prerequisites step.
+        shell: sh
+        run: |
+          set -eu
+          minor="$(grep -E '^go [0-9]' go.mod | sed -E 's/^go ([0-9]+\.[0-9]+).*/\1/')"
+          next="${minor%.*}.$(( ${minor#*.} + 1 ))"
+          tdnf -y install "golang<${next}"
+
+      - name: Confirm systemcrypto toolchain is active
+        run: |
+          set -euo pipefail
+          minor="$(grep -E '^go [0-9]' go.mod | sed -E 's/^go ([0-9]+\.[0-9]+).*/\1/')"
+          go version
+          go version | grep -qF "go${minor}."
+          go env GOEXPERIMENT | tr ',' '\n' | grep -qx systemcrypto
+
+      - name: Build (systemcrypto)
+        run: make azurelustre-systemcrypto
+
+      - name: Smoke-test built binary (exercises SymCrypt-OpenSSL dlopen at startup)
+        run: ./_output/azurelustreplugin --version
+
+      - name: Unit tests (systemcrypto)
+        run: make unit-test
+
+      - name: Sanity tests (systemcrypto)
+        run: make sanity-test-local
