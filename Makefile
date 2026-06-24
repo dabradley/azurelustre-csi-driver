@@ -121,17 +121,13 @@ helm-chart-packages:
 #
 # Azure Lustre: Code build
 #
-.PHONY: quicklustre
-quicklustre:
-	GOOS=linux GOARCH=$(ARCH) go build -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
-
 .PHONY: azurelustre
 azurelustre:
-	GOOS=linux GOARCH=$(ARCH) go build -a -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
+	GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags ${LDFLAGS} -mod vendor -o _output/azurelustreplugin ./pkg/azurelustreplugin
 
 .PHONY: azurelustre-dalec
 azurelustre-dalec:
-	GOOS=linux go build -a -ldflags ${LDFLAGS} -mod vendor -o /app/azurelustreplugin ./pkg/azurelustreplugin
+	GOOS=linux go build -a -trimpath -ldflags ${LDFLAGS} -mod vendor -o /app/azurelustreplugin ./pkg/azurelustreplugin
 
 #
 # Azure Lustre: Docker build / tag / push
