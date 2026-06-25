@@ -4,6 +4,13 @@ apiVersion: apps/v1
 metadata:
   name: csi-azurelustre-node-noble
   namespace: kube-system
+  labels:
+    app.kubernetes.io/component: node
+    app.kubernetes.io/name: azurelustre-csi-driver
+    app.kubernetes.io/part-of: azurelustre-csi-driver
+    app.kubernetes.io/version: latest
+    app: csi-azurelustre-node
+    flavor: noble
 spec:
   updateStrategy:
     rollingUpdate:
@@ -12,10 +19,15 @@ spec:
   selector:
     matchLabels:
       app: csi-azurelustre-node
+      app.kubernetes.io/component: node
       flavor: noble
   template:
     metadata:
       labels:
+        app.kubernetes.io/component: node
+        app.kubernetes.io/name: azurelustre-csi-driver
+        app.kubernetes.io/part-of: azurelustre-csi-driver
+        app.kubernetes.io/version: latest
         app: csi-azurelustre-node
         flavor: noble
     spec:
@@ -24,7 +36,6 @@ spec:
       serviceAccountName: csi-azurelustre-node-sa
       nodeSelector:
         kubernetes.io/os: linux
-        kubernetes.azure.com/os-sku-effective: Ubuntu2404
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -34,9 +45,13 @@ spec:
                     operator: NotIn
                     values:
                       - virtual-kubelet
+                  - key: kubernetes.azure.com/os-sku-effective
+                    operator: In
+                    values:
+                      - Ubuntu2404
       priorityClassName: system-node-critical
       tolerations:
-        - operator: "Exists"
+        - operator: Exists
       containers:
         - name: liveness-probe
           volumeMounts:
@@ -92,11 +107,14 @@ spec:
           lifecycle:
             preStop:
               exec:
-                command: ["/bin/sh", "-c", "lustre_rmmod"]
+                command:
+                  - /bin/sh
+                  - -c
+                  - lustre_rmmod
           args:
-            - "-v=5"
-            - "--endpoint=$(CSI_ENDPOINT)"
-            - "--nodeid=$(KUBE_NODE_NAME)"
+            - -v=5
+            - --endpoint=$(CSI_ENDPOINT)
+            - --nodeid=$(KUBE_NODE_NAME)
           ports:
             - containerPort: 29763
               name: healthz
@@ -150,7 +168,7 @@ spec:
               name: socket-dir
             - mountPath: /var/lib/kubelet/
               name: mountpoint-dir
-              mountPropagation: "Bidirectional"
+              mountPropagation: Bidirectional
             - mountPath: /etc/kubernetes/
               name: azure-cred
             - mountPath: /dev

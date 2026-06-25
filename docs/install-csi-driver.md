@@ -4,6 +4,31 @@ This document explains how to install Azure Lustre CSI driver on a kubernetes cl
 
 ## Instructions for current production release
 
+### Install with Helm (recommended)
+
+Helm is the recommended installation method for production clusters.
+
+```shell
+helm repo add azurelustre-csi-driver https://raw.githubusercontent.com/kubernetes-sigs/azurelustre-csi-driver/main/charts
+helm repo update
+helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver \
+  --namespace kube-system --create-namespace --version 0.5.0
+```
+
+To upgrade:
+
+```shell
+helm upgrade azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system
+```
+
+To uninstall:
+
+```shell
+helm uninstall azurelustre -n kube-system
+```
+
+For the full list of configurable values, version history, and advanced Helm usage, see the [Helm chart README](../charts/README.md).
+
 ### Install with kubectl
 
 - Option 1: Remote install
@@ -31,10 +56,10 @@ This document explains how to install Azure Lustre CSI driver on a kubernetes cl
 
     $ kubectl get -n kube-system pod -l app=csi-azurelustre-node
 
-    NAME                        READY    STATUS    RESTARTS   AGE
-    csi-azurelustre-node-7lw2n   3/3     Running   0          30s
-    csi-azurelustre-node-drlq2   3/3     Running   0          30s
-    csi-azurelustre-node-g6sfx   3/3     Running   0          30s
+    NAME                              READY    STATUS    RESTARTS   AGE
+    csi-azurelustre-node-jammy-7lw2n   3/3     Running   0          30s
+    csi-azurelustre-node-jammy-drlq2   3/3     Running   0          30s
+    csi-azurelustre-node-noble-g6sfx   3/3     Running   0          30s
     ```
 
 ## Supported node operating systems
@@ -168,6 +193,8 @@ The container uses a wrapper script (`start.sh`) that checks for a custom entryp
 
 ### Installing with a Custom Entrypoint
 
+#### kubectl
+
 Pass `--custom-entrypoint <file>` to the install script:
 
 ```shell
@@ -176,7 +203,23 @@ Pass `--custom-entrypoint <file>` to the install script:
 
 This creates a ConfigMap from the provided file and restarts the node DaemonSet pods to use it.
 
+#### Helm
+
+The Helm chart always mounts the custom entrypoint ConfigMap as optional, so no chart upgrade is needed. Create the ConfigMap and restart the node pods:
+
+```shell
+# Create the ConfigMap from your custom entrypoint script
+kubectl create configmap csi-azurelustre-entrypoint \
+  --from-file=entrypoint.sh=./my-entrypoint.sh \
+  -n kube-system
+
+# Restart node DaemonSet pods to pick up the custom entrypoint
+kubectl rollout restart daemonset -l app=csi-azurelustre-node -n kube-system
+```
+
 ### Reverting to the Built-in Entrypoint
+
+#### Revert with kubectl
 
 Run the install script without the `--custom-entrypoint` flag:
 
@@ -185,6 +228,15 @@ Run the install script without the `--custom-entrypoint` flag:
 ```
 
 This deletes the ConfigMap and restarts the node pods to use the built-in entrypoint. **The custom entrypoint is not sticky** — each install must explicitly request it.
+
+#### Revert with Helm
+
+Delete the ConfigMap and restart the node pods:
+
+```shell
+kubectl delete configmap csi-azurelustre-entrypoint -n kube-system --ignore-not-found
+kubectl rollout restart daemonset -l app=csi-azurelustre-node -n kube-system
+```
 
 ### Important Notes
 

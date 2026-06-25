@@ -24,6 +24,18 @@ make azurelustre
 
 &nbsp;
 
+- (Optional) Build with the production crypto path (systemcrypto)
+
+The released driver builds with `GOEXPERIMENT=systemcrypto` (FIPS-compliant host OpenSSL) via the Microsoft Go toolchain. To reproduce that build locally — e.g. to debug a FIPS-only issue — install the Microsoft Go toolchain (`msft-golang`) and run:
+
+```sh
+make azurelustre-systemcrypto
+```
+
+This target requires `msft-golang` on `PATH`; stock upstream Go cannot build it (it errors on the `systemcrypto` GOEXPERIMENT). The same target runs pre-merge in the `Systemcrypto Build and Test` CI lane across the shipped flavors (jammy, noble, azurelinux3) and architectures.
+
+&nbsp;
+
 - Run verification before sending PR
 
 ```sh
@@ -32,7 +44,24 @@ make verify
 
 &nbsp;
 
-- Build container image and push to ACR
+- Update the Helm chart index after changing charts
+
+If you modify any chart templates or values, repackage the charts and regenerate
+the index:
+
+```sh
+make helm-chart-packages
+```
+
+Or equivalently:
+
+```sh
+hack/update-helm-chart-packages.sh
+```
+
+The `make verify` step will fail if the packages or index are out of date.
+
+- Build container image locally for testing
 
 Set up a personal ACR if you don't have one (one-time):
 
@@ -75,6 +104,25 @@ az acr task create --name purge-old-images \
     --cmd "acr purge --filter 'azurelustre-csi:.*' --ago 30d --untagged" \
     --schedule "0 4 * * 0" --context /dev/null
 ```
+
+Note: This builds images from the local Dockerfile for development and testing.
+Production images are built through DALEC (see below).
+
+&nbsp;
+
+## DALEC image builds
+
+Production images are built through [DALEC](https://github.com/Azure/dalec-build-defs),
+not from the Dockerfiles in this repo. The Dockerfiles
+(`pkg/azurelustreplugin/Dockerfile`) are only for local development and testing;
+released images come from hand-authored DALEC specs under
+`specs/kubernetes-csi-azurelustre/` in the dalec-build-defs repo — one spec per
+version, per OS flavor, with no template/matrix generation for this project.
+Each spec pins a `COMMIT` from this repo and builds with `make azurelustre-dalec`.
+
+For local iteration, build and run the image from the Dockerfile with
+`make container`. The DALEC images are produced during the release process — see
+[RELEASE.md](../RELEASE.md) for the full release and tagging flow.
 
 &nbsp;
 &nbsp;
