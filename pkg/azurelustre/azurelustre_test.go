@@ -40,6 +40,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	mount "k8s.io/mount-utils"
 	azure "sigs.k8s.io/cloud-provider-azure/pkg/provider"
 )
 
@@ -59,14 +60,16 @@ const (
 	emptyZonesLocation        = "emptyZonesLocation"
 )
 
-func NewFakeDriver() *Driver {
+func NewFakeDriver(t *testing.T) *Driver {
+	t.Helper()
 	driverOptions := DriverOptions{
 		NodeID:                       fakeNodeID,
 		DriverName:                   fakeDriverName,
 		EnableAzureLustreMockMount:   false,
 		EnableAzureLustreMockDynProv: true,
 	}
-	driver := NewDriver(&driverOptions)
+	driver, err := NewDriver(&driverOptions)
+	require.NoError(t, err)
 	driver.Version = vendorVersion
 	driver.cloud = &azure.Cloud{}
 	driver.cloud.SubscriptionID = "defaultFakeSubID"
@@ -165,7 +168,8 @@ func TestNewDriver(t *testing.T) {
 		WorkingMountDir:              "/tmp",
 		RemoveNotReadyTaint:          true,
 	}
-	d := NewDriver(&driverOptions)
+	d, err := NewDriver(&driverOptions)
+	require.NoError(t, err)
 	assert.NotNil(t, d)
 	assert.NotNil(t, d.cloud)
 	assert.NotNil(t, d.dynamicProvisioner)
@@ -202,7 +206,8 @@ func TestNewDriverInvalidConfigFileLocation(t *testing.T) {
 		WorkingMountDir:              "/tmp",
 		RemoveNotReadyTaint:          true,
 	}
-	d := NewDriver(&driverOptions)
+	d, err := NewDriver(&driverOptions)
+	require.NoError(t, err)
 	assert.NotNil(t, d)
 	assert.Equal(t, &azure.Cloud{}, d.cloud)
 	assert.Equal(t, &DynamicProvisioner{}, d.dynamicProvisioner)
@@ -232,10 +237,47 @@ func TestNewDriverInvalidConfigFileContents(t *testing.T) {
 		WorkingMountDir:              "/tmp",
 		RemoveNotReadyTaint:          true,
 	}
-	d := NewDriver(&driverOptions)
+	d, err := NewDriver(&driverOptions)
+	require.NoError(t, err)
 	assert.NotNil(t, d)
 	assert.Equal(t, &azure.Cloud{}, d.cloud)
 	assert.Equal(t, &DynamicProvisioner{}, d.dynamicProvisioner)
+}
+
+func TestNewDriverNoCloudConfigReturnsError(t *testing.T) {
+	missingConfigFile := "fake-cred-file-no-config.json"
+
+	if err := os.Remove(missingConfigFile); err != nil && !os.IsNotExist(err) {
+		t.Error(err)
+	}
+
+	t.Setenv(DefaultAzureConfigFileEnv, missingConfigFile)
+
+	driverOptions := DriverOptions{
+		NodeID:                       fakeNodeID,
+		DriverName:                   fakeDriverName,
+		EnableAzureLustreMockMount:   false,
+		EnableAzureLustreMockDynProv: false,
+		WorkingMountDir:              "/tmp",
+		RemoveNotReadyTaint:          true,
+	}
+	d, err := NewDriver(&driverOptions)
+	require.Error(t, err, "NewDriver should return an error when no cloud config is provided and mock dynamic provisioning is disabled")
+	assert.Nil(t, d, "driver should be nil when NewDriver fails")
+}
+
+func TestSelectForceUnmounter(t *testing.T) {
+	t.Run("returns force unmounter when the mounter supports it", func(t *testing.T) {
+		forceUnmounter, err := selectForceUnmounter(&fakeMounter{})
+		require.NoError(t, err)
+		assert.NotNil(t, forceUnmounter, "force unmounter should be returned when the mounter supports it")
+	})
+
+	t.Run("returns an error when the mounter does not support force unmount", func(t *testing.T) {
+		forceUnmounter, err := selectForceUnmounter(&mount.FakeMounter{})
+		require.Error(t, err, "an error should be returned when the mounter does not support force unmount")
+		assert.Nil(t, forceUnmounter, "force unmounter should be nil when not supported")
+	})
 }
 
 func TestIsCorruptedDir(t *testing.T) {
@@ -398,7 +440,7 @@ func TestPopulateSubnetPropertiesFromCloudConfig(t *testing.T) {
 		{
 			name: "NetworkResourceSubscriptionID is Empty",
 			testFunc: func(t *testing.T) {
-				d := NewFakeDriver()
+				d := NewFakeDriver(t)
 				d.cloud = &azure.Cloud{}
 				d.cloud.SubscriptionID = "fakeSubID"
 				d.cloud.NetworkResourceSubscriptionID = ""
@@ -422,7 +464,7 @@ func TestPopulateSubnetPropertiesFromCloudConfig(t *testing.T) {
 		{
 			name: "NetworkResourceSubscriptionID is not Empty",
 			testFunc: func(t *testing.T) {
-				d := NewFakeDriver()
+				d := NewFakeDriver(t)
 				d.cloud = &azure.Cloud{}
 				d.cloud.SubscriptionID = "fakeSubID"
 				d.cloud.NetworkResourceSubscriptionID = "fakeNetSubID"
@@ -446,7 +488,7 @@ func TestPopulateSubnetPropertiesFromCloudConfig(t *testing.T) {
 		{
 			name: "VnetResourceGroup is Empty",
 			testFunc: func(t *testing.T) {
-				d := NewFakeDriver()
+				d := NewFakeDriver(t)
 				d.cloud = &azure.Cloud{}
 				d.cloud.SubscriptionID = "bar"
 				d.cloud.NetworkResourceSubscriptionID = "bar"
@@ -470,7 +512,7 @@ func TestPopulateSubnetPropertiesFromCloudConfig(t *testing.T) {
 		{
 			name: "VnetResourceGroup is not Empty",
 			testFunc: func(t *testing.T) {
-				d := NewFakeDriver()
+				d := NewFakeDriver(t)
 				d.cloud = &azure.Cloud{}
 				d.cloud.SubscriptionID = "bar"
 				d.cloud.NetworkResourceSubscriptionID = "bar"
@@ -494,7 +536,7 @@ func TestPopulateSubnetPropertiesFromCloudConfig(t *testing.T) {
 		{
 			name: "VnetResourceGroup, vnetName, subnetName is specified",
 			testFunc: func(t *testing.T) {
-				d := NewFakeDriver()
+				d := NewFakeDriver(t)
 				d.cloud = &azure.Cloud{}
 				d.cloud.SubscriptionID = "bar"
 				d.cloud.NetworkResourceSubscriptionID = "bar"
@@ -670,7 +712,7 @@ func TestRemoveNotReadyTaintIfNeeded(t *testing.T) {
 
 				// Create driver with fake client
 				initialDelay := 1 * time.Second
-				d := NewFakeDriver()
+				d := NewFakeDriver(t)
 				d.NodeID = tc.nodeName
 				d.kubeClient = fakeClient
 				d.removeNotReadyTaint = tc.featureEnabled
@@ -732,7 +774,7 @@ func TestRemoveNotReadyTaintIfNeeded(t *testing.T) {
 }
 
 func TestAddControllerServiceCapabilities(t *testing.T) {
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 	cl := []csi.ControllerServiceCapability_RPC_Type{csi.ControllerServiceCapability_RPC_UNKNOWN}
 	d.AddControllerServiceCapabilities(cl)
 	assert.Len(t, d.Cap, 1)
@@ -740,7 +782,7 @@ func TestAddControllerServiceCapabilities(t *testing.T) {
 }
 
 func TestAddNodeServiceCapabilities(t *testing.T) {
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 
 	nl := []csi.NodeServiceCapability_RPC_Type{csi.NodeServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER}
 	d.AddNodeServiceCapabilities(nl)
@@ -749,7 +791,7 @@ func TestAddNodeServiceCapabilities(t *testing.T) {
 }
 
 func TestAddVolumeCapabilityAccessModes(t *testing.T) {
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 
 	vc := []csi.VolumeCapability_AccessMode_Mode{csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER}
 	d.AddVolumeCapabilityAccessModes(vc)
