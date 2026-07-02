@@ -65,12 +65,16 @@ controller:
     - key: "node-role.kubernetes.io/control-plane"
       operator: "Exists"
       effect: "NoSchedule"
+    - key: "CriticalAddonsOnly"
+      operator: "Exists"
   priorityClassName: system-cluster-critical
   extraArgs: ["-v=5"]
 
 node:
   tolerations:
     - operator: "Exists"
+  updateStrategy:
+    maxUnavailable: 10%
   priorityClassName: system-node-critical
   lustreClient:
     install: true

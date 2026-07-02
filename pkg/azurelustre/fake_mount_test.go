@@ -106,7 +106,7 @@ func TestMount(t *testing.T) {
 		},
 	}
 
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 	fakeMounter := &fakeMounter{}
 	d.mounter = &mount.SafeFormatAndMount{
 		Interface: fakeMounter,
@@ -146,7 +146,7 @@ func TestMountSensitive(t *testing.T) {
 		},
 	}
 
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 	fakeMounter := &fakeMounter{}
 	d.mounter = &mount.SafeFormatAndMount{
 		Interface: fakeMounter,
@@ -188,7 +188,7 @@ func TestMountSensitiveWithoutSystemdWithMountFlags(t *testing.T) {
 		},
 	}
 
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 	fakeMounter := &fakeMounter{}
 	d.mounter = &mount.SafeFormatAndMount{
 		Interface: fakeMounter,
@@ -228,7 +228,7 @@ func TestIsLikelyNotMountPoint(t *testing.T) {
 		},
 	}
 
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 	fakeMounter := &fakeMounter{}
 	d.mounter = &mount.SafeFormatAndMount{
 		Interface: fakeMounter,

@@ -546,7 +546,7 @@ kubectl get pods -n kube-system -l app=csi-azurelustre-node -o custom-columns=NA
 
    ```yaml
    rollingUpdate:
-     maxUnavailable: 1
+     maxUnavailable: 10%
    type: RollingUpdate
    ```
 

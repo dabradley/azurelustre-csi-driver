@@ -41,7 +41,7 @@ const (
 )
 
 func TestNodeGetInfo(t *testing.T) {
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 
 	// Test valid request
 	req := csi.NodeGetInfoRequest{}
@@ -51,7 +51,7 @@ func TestNodeGetInfo(t *testing.T) {
 }
 
 func TestNodeGetCapabilities(t *testing.T) {
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 	capType := &csi.NodeServiceCapability_Rpc{
 		Rpc: &csi.NodeServiceCapability_RPC{
 			Type: csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
@@ -108,7 +108,7 @@ func TestEnsureMountPoint(t *testing.T) {
 	}
 
 	// Setup
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 	fakeMounter := &fakeMounter{}
 	fakeExec := &testingexec.FakeExec{ExactOrder: true}
 	d.mounter = &mount.SafeFormatAndMount{
@@ -523,7 +523,7 @@ func TestNodePublishVolume(t *testing.T) {
 		},
 	}
 
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 
 	for i := range tests {
 		test := &tests[i]
@@ -721,7 +721,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 	}
 
 	// Setup
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 	d.workingMountDir = workingMountDir
 
 	for i := range tests {
@@ -855,7 +855,7 @@ func TestNodeGetVolumeStats(t *testing.T) {
 	}
 
 	// Setup
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 
 	for i := range tests {
 		test := &tests[i]
@@ -1277,7 +1277,7 @@ func TestNewLustreVolume(t *testing.T) {
 }
 
 func TestNodeStageVolume(t *testing.T) {
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 	req := csi.NodeStageVolumeRequest{}
 	resp, err := d.NodeStageVolume(context.Background(), &req)
 	assert.Nil(t, resp)
@@ -1286,7 +1286,7 @@ func TestNodeStageVolume(t *testing.T) {
 }
 
 func TestNodeUnstageVolume(t *testing.T) {
-	d := NewFakeDriver()
+	d := NewFakeDriver(t)
 	req := csi.NodeUnstageVolumeRequest{}
 	resp, err := d.NodeUnstageVolume(context.Background(), &req)
 	assert.Nil(t, resp)

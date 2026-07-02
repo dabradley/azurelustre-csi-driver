@@ -14,7 +14,7 @@ metadata:
 spec:
   updateStrategy:
     rollingUpdate:
-      maxUnavailable: 1
+      maxUnavailable: 10%
     type: RollingUpdate
   selector:
     matchLabels:
@@ -37,6 +37,9 @@ spec:
       nodeSelector:
         kubernetes.io/os: linux
         kubernetes.io/arch: amd64
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -71,6 +74,11 @@ spec:
             requests:
               cpu: 10m
               memory: 20Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
         - name: node-driver-registrar
           image: mcr.microsoft.com/oss/kubernetes-csi/csi-node-driver-registrar:v2.13.0
           args:
@@ -102,6 +110,11 @@ spec:
             requests:
               cpu: 10m
               memory: 20Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
         - name: azurelustre
           image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:latest-azurelinux3
           imagePullPolicy: Always

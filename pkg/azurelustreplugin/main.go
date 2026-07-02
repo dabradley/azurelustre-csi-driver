@@ -75,11 +75,13 @@ func handle() error {
 		WorkingMountDir:              *workingMountDir,
 		RemoveNotReadyTaint:          *removeNotReadyTaint,
 	}
-	driver := azurelustre.NewDriver(&driverOptions)
-	if driver == nil {
-		return errDriverInitFailed
+	driver, err := azurelustre.NewDriver(&driverOptions)
+	if err != nil {
+		return errors.Join(errDriverInitFailed, err)
 	}
-	driver.Run(*endpoint, false)
+	if err := driver.Run(*endpoint, false); err != nil {
+		return err
+	}
 	// driver.Run is expected to block forever serving the CSI gRPC endpoint;
 	// returning means the server stopped without an explicit shutdown signal,
 	// which should surface as a non-zero process exit.

@@ -19,6 +19,7 @@ package azurelustre
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -170,7 +171,7 @@ type Driver struct {
 
 // NewDriver creates a new Driver. Assumes vendor version is equal to driver version &
 // does not support optional driver plugin info manifest field. Refer to CSI spec for more details.
-func NewDriver(options *DriverOptions) *Driver {
+func NewDriver(options *DriverOptions) (*Driver, error) {
 	d := Driver{
 		volLockMap:                   util.NewLockMap(),
 		volumeLocks:                  newVolumeLocks(),
@@ -208,7 +209,7 @@ func NewDriver(options *DriverOptions) *Driver {
 			d.dynamicProvisioner = &DynamicProvisioner{}
 			d.cloud = az
 		} else {
-			klog.Fatalf("no cloud config provided, error")
+			return nil, errors.New("no cloud config provided")
 		}
 	} else {
 		config.UserAgent = GetUserAgent(d.Name, "", "")
@@ -267,7 +268,7 @@ func NewDriver(options *DriverOptions) *Driver {
 		}
 	}
 
-	return &d
+	return &d, nil
 }
 
 func (d *Driver) populateSubnetPropertiesFromCloudConfig(subnetInfo SubnetProperties) SubnetProperties {
@@ -299,28 +300,29 @@ func (d *Driver) populateSubnetPropertiesFromCloudConfig(subnetInfo SubnetProper
 }
 
 // Run driver initialization
-func (d *Driver) Run(endpoint string, testBool bool) {
+func (d *Driver) Run(endpoint string, testBool bool) error {
 	versionMeta, err := GetVersionYAML(d.Name)
 	if err != nil {
-		klog.Fatalf("%v", err)
+		return fmt.Errorf("failed to get driver version: %w", err)
 	}
 	klog.Infof("\nDRIVER INFORMATION:\n-------------------\n%s\n\nStreaming logs below:", versionMeta)
 
-	d.mounter = &mount.SafeFormatAndMount{
-		Interface: mount.New(""),
-		Exec:      utilexec.New(),
-	}
-	forceUnmounter, ok := d.mounter.Interface.(mount.MounterForceUnmounter)
-	if ok {
-		klog.V(4).Infof("Using force unmounter interface")
-		d.forceMounter = &forceUnmounter
-	} else {
-		klog.Fatalf("Mounter does not support force unmount")
+	// Only node pods mount filesystems. Constructing the host mounter runs a
+	// one-time umount capability probe that requires mount privileges, so set it
+	// up only for node pods (identified by a non-empty NodeID).
+	if d.NodeID != "" {
+		d.mounter = &mount.SafeFormatAndMount{
+			Interface: mount.New(""),
+			Exec:      utilexec.New(),
+		}
+		forceUnmounter, err := selectForceUnmounter(d.mounter.Interface)
+		if err != nil {
+			return err
+		}
+		d.forceMounter = forceUnmounter
 	}
 
-	// TODO_JUSJIN: revisit these caps
 	// Initialize default library driver
-	// TODO_CHYIN: move this to {service}.go
 	d.AddControllerServiceCapabilities(controllerServiceCapabilities)
 	d.AddVolumeCapabilityAccessModes(volumeCapabilities)
 	d.AddNodeServiceCapabilities(nodeServiceCapabilities)
@@ -328,9 +330,22 @@ func (d *Driver) Run(endpoint string, testBool bool) {
 	d.removeNotReadyTaintIfNeeded()
 
 	s := NewNonBlockingGRPCServer()
-	// Driver d act as IdentityServer, ControllerServer and NodeServer
 	s.Start(endpoint, d, d, d, testBool)
 	s.Wait()
+
+	return nil
+}
+
+// selectForceUnmounter returns the force-unmount capable view of the given
+// mounter. It returns an error if the mounter does not implement
+// mount.MounterForceUnmounter.
+func selectForceUnmounter(mounter mount.Interface) (*mount.MounterForceUnmounter, error) {
+	forceUnmounter, ok := mounter.(mount.MounterForceUnmounter)
+	if !ok {
+		return nil, errors.New("mounter does not support force unmount")
+	}
+	klog.V(4).Infof("Using force unmounter interface")
+	return &forceUnmounter, nil
 }
 
 func (d *Driver) AddControllerServiceCapabilities(cl []csi.ControllerServiceCapability_RPC_Type) {

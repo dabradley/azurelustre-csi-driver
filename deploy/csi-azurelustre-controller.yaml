@@ -18,6 +18,8 @@ spec:
       app.kubernetes.io/component: controller
   template:
     metadata:
+      annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
       labels:
         app: csi-azurelustre-controller
         app.kubernetes.io/component: controller
@@ -39,6 +41,54 @@ spec:
         - key: node-role.kubernetes.io/control-plane
           operator: Exists
           effect: NoSchedule
+        - key: CriticalAddonsOnly
+          operator: Exists
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: type
+                    operator: NotIn
+                    values:
+                      - virtual-kubelet
+                  - key: kubernetes.azure.com/cluster
+                    operator: Exists
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.azure.com/mode
+                    operator: In
+                    values:
+                      - system
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - csi-azurelustre-controller
+                topologyKey: topology.kubernetes.io/zone
+              weight: 10
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - csi-azurelustre-controller
+                topologyKey: kubernetes.io/hostname
+              weight: 5
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: csi-provisioner
           image: mcr.microsoft.com/oss/kubernetes-csi/csi-provisioner:v5.2.0
@@ -61,6 +111,11 @@ spec:
             requests:
               cpu: 10m
               memory: 20Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
         - name: liveness-probe
           image: mcr.microsoft.com/oss/kubernetes-csi/livenessprobe:v2.15.0
           args:
@@ -77,8 +132,13 @@ spec:
             requests:
               cpu: 10m
               memory: 20Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
         - name: azurelustre
-          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:latest-jammy
+          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:latest-noble
           imagePullPolicy: Always
           args:
             - -v=5
@@ -105,7 +165,10 @@ spec:
             - name: AZURELUSTRE_CSI_INSTALL_LUSTRE_CLIENT
               value: "no"
           securityContext:
-            privileged: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           volumeMounts:
             - mountPath: /csi
               name: socket-dir

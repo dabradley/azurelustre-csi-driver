@@ -15,10 +15,11 @@ spec:
       app: csi-azurelustre-controller
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
       annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       labels:
         app.kubernetes.io/component: controller
         app: csi-azurelustre-controller
@@ -33,6 +34,52 @@ spec:
       priorityClassName: {{ .Values.controller.priorityClassName }}
       tolerations:
         {{- toYaml .Values.controller.tolerations | nindent 8 }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: type
+                    operator: NotIn
+                    values:
+                      - virtual-kubelet
+                  - key: kubernetes.azure.com/cluster
+                    operator: Exists
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.azure.com/mode
+                    operator: In
+                    values:
+                      - system
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - csi-azurelustre-controller
+                topologyKey: topology.kubernetes.io/zone
+              weight: 10
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - csi-azurelustre-controller
+                topologyKey: kubernetes.io/hostname
+              weight: 5
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: csi-provisioner
           image: {{ .Values.sidecars.provisioner.repository }}:{{ .Values.sidecars.provisioner.tag }}
@@ -49,6 +96,11 @@ spec:
               name: socket-dir
           resources:
             {{- toYaml .Values.sidecars.provisioner.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
         - name: liveness-probe
           image: {{ .Values.sidecars.livenessProbe.repository }}:{{ .Values.sidecars.livenessProbe.tag }}
           args:
@@ -60,8 +112,13 @@ spec:
               mountPath: /csi
           resources:
             {{- toYaml .Values.sidecars.livenessProbe.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
         - name: azurelustre
-          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}-jammy
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}-noble
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
 {{- range $arg := .Values.controller.extraArgs }}
@@ -86,7 +143,10 @@ spec:
             - name: AZURELUSTRE_CSI_INSTALL_LUSTRE_CLIENT
               value: "no"
           securityContext:
-            privileged: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           volumeMounts:
             - mountPath: /csi
               name: socket-dir
