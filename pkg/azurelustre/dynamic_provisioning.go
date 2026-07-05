@@ -463,7 +463,10 @@ func (d *DynamicProvisioner) checkSubnetAddresses(ctx context.Context, vnetResou
 		}
 
 		for _, usageValue := range page.Value {
-			if *usageValue.ID == subnetID {
+			// Azure resource group names are case-insensitive, but different ARM
+			// endpoints may echo back different casing for the same resource ID,
+			// so compare case-insensitively to avoid false "subnet not found" errors.
+			if strings.EqualFold(*usageValue.ID, subnetID) {
 				usedIPs := *usageValue.CurrentValue
 				limitIPs := *usageValue.Limit
 				availableIPs := int(limitIPs) - int(usedIPs)

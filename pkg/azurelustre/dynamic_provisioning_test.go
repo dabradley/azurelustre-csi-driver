@@ -48,22 +48,29 @@ type mockAmlfsRecorder struct {
 }
 
 const (
-	expectedMgsAddress                          = "127.0.0.3"
-	expectedResourceGroupName                   = "fake-resource-group"
-	expectedAmlFilesystemName                   = "fake-amlfs"
-	expectedLocation                            = "fake-location"
-	expectedAmlFilesystemSubnetSize             = 24
-	expectedUsedIPCount                         = 10
-	expectedFullIPCount                         = 256
-	expectedTotalIPCount                        = 256
-	expectedSku                                 = "fake-sku"
-	otherSkuForLocation                         = "other-sku-for-location"
-	expectedClusterSize                         = 48
-	expectedSkuIncrement                        = "4"
-	expectedSkuMaximum                          = "128"
-	expectedVnetName                            = "fake-vnet"
-	expectedAmlFilesystemSubnetName             = "fake-subnet-name"
-	expectedAmlFilesystemSubnetID               = "fake-subnet-id"
+	expectedMgsAddress              = "127.0.0.3"
+	expectedResourceGroupName       = "fake-resource-group"
+	expectedAmlFilesystemName       = "fake-amlfs"
+	expectedLocation                = "fake-location"
+	expectedAmlFilesystemSubnetSize = 24
+	expectedUsedIPCount             = 10
+	expectedFullIPCount             = 256
+	expectedTotalIPCount            = 256
+	expectedSku                     = "fake-sku"
+	otherSkuForLocation             = "other-sku-for-location"
+	expectedClusterSize             = 48
+	expectedSkuIncrement            = "4"
+	expectedSkuMaximum              = "128"
+	expectedVnetName                = "fake-vnet"
+	expectedAmlFilesystemSubnetName = "fake-subnet-name"
+	expectedAmlFilesystemSubnetID   = "fake-subnet-id"
+	// caseMismatchAmlFilesystemSubnetID is the same subnet ID as
+	// expectedAmlFilesystemSubnetID but with different casing, used to
+	// simulate the ARM VNet ListUsage API returning a differently-cased
+	// resource group segment than the one the driver builds itself
+	// (see GitHub issue #290).
+	caseMismatchAmlFilesystemSubnetID           = "FAKE-SUBNET-ID"
+	caseMismatchVnetName                        = "case-mismatch-vnet"
 	fullVnetName                                = "full-vnet"
 	invalidSku                                  = "invalid-sku"
 	missingAmlFilesystemSubnetID                = "missing-subnet-id"
@@ -371,6 +378,21 @@ func newFakeVnetServer(_ *testing.T, recorder *mockAmlfsRecorder) *networkfake.V
 			resp.AddPage(http.StatusOK, armnetwork.VirtualNetworksClientListUsageResponse{
 				VirtualNetworkListUsageResult: armnetwork.VirtualNetworkListUsageResult{
 					Value: []*armnetwork.VirtualNetworkUsage{},
+				},
+			}, nil)
+			return resp
+		}
+
+		if vnetName == caseMismatchVnetName {
+			resp.AddPage(http.StatusOK, armnetwork.VirtualNetworksClientListUsageResponse{
+				VirtualNetworkListUsageResult: armnetwork.VirtualNetworkListUsageResult{
+					Value: []*armnetwork.VirtualNetworkUsage{
+						{
+							ID:           to.Ptr(string(caseMismatchAmlFilesystemSubnetID)),
+							CurrentValue: to.Ptr(float64(expectedUsedIPCount)),
+							Limit:        to.Ptr(float64(expectedTotalIPCount)),
+						},
+					},
 				},
 			}, nil)
 			return resp
@@ -1369,6 +1391,25 @@ func TestDynamicProvisioner_CheckSubnetCapacity_FullVnet(t *testing.T) {
 	hasSufficientCapacity, err := dynamicProvisioner.CheckSubnetCapacity(context.Background(), subnetInfo, expectedSku, expectedClusterSize)
 	require.NoError(t, err)
 	assert.False(t, hasSufficientCapacity)
+}
+
+// TestDynamicProvisioner_CheckSubnetCapacity_Success_CaseInsensitiveSubnetIDMatch
+// covers GitHub issue #290: the subnet ID the driver builds locally must
+// still match the subnet ID the ARM VirtualNetworks ListUsage API returns
+// even if that API echoes back different casing, since
+// Azure resource group names are case-insensitive.
+func TestDynamicProvisioner_CheckSubnetCapacity_Success_CaseInsensitiveSubnetIDMatch(t *testing.T) {
+	recorder := newMockAmlfsRecorder([]string{})
+	dynamicProvisioner := newTestDynamicProvisioner(t, recorder)
+
+	subnetInfo := buildExpectedSubnetInfo()
+	subnetInfo.VnetName = caseMismatchVnetName
+	// subnetInfo.SubnetID keeps expectedAmlFilesystemSubnetID's normal casing,
+	// while the fake ARM server (keyed off caseMismatchVnetName) returns the
+	// same subnet ID as caseMismatchAmlFilesystemSubnetID (upper-cased).
+	hasSufficientCapacity, err := dynamicProvisioner.CheckSubnetCapacity(context.Background(), subnetInfo, expectedSku, expectedClusterSize)
+	require.NoError(t, err)
+	assert.True(t, hasSufficientCapacity)
 }
 
 func TestDynamicProvisioner_CheckSubnetCapacity_Err_NilMgmtClient(t *testing.T) {
