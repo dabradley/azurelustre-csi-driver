@@ -40,10 +40,28 @@ envsubst < integration_dalec_aks.yaml.template | kubectl apply -f -
 
 # The driver container runs for the life of the pod, so we cannot wait on the
 # whole pod terminating. Instead wait for the "tester" container to finish and
-# read its exit code. The driver "tester" container names must match the pod
-# template.
+# read its exit code. The "driver" and "tester" container names must match the
+# pod template.
 tester_container=tester
 driver_container=driver
+
+# Container waiting reasons that will never resolve on their own (bad/missing
+# image, crash loop, misconfig). If either container hits one of these, fail
+# fast instead of waiting out the full timeout.
+fatal_waiting_reason() {
+  local reason
+  for c in "${tester_container}" "${driver_container}"; do
+    reason=$(kubectl get pod "${pod}" \
+      -o=jsonpath="{.status.containerStatuses[?(@.name==\"${c}\")].state.waiting.reason}" 2>/dev/null || echo "")
+    case "${reason}" in
+      ImagePullBackOff|ErrImagePull|InvalidImageName|CrashLoopBackOff|CreateContainerConfigError|CreateContainerError)
+        echo "ERROR: ${c} container is stuck in ${reason}; aborting." >&2
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
 
 echo "Waiting for the ${tester_container} container to complete..."
 result=""
@@ -56,6 +74,11 @@ for _ in $(seq 1 300); do
     break
   fi
   if [[ "${phase}" == "Failed" ]]; then
+    break
+  fi
+  # Catch image-pull/scheduling/crash failures that leave the pod Pending or
+  # Running (not Failed) so we don't block for the whole timeout window.
+  if fatal_waiting_reason; then
     break
   fi
   sleep 2

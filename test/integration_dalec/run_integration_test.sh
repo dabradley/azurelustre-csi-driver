@@ -35,8 +35,9 @@ readonly lustre_fs_ip=1.2.3.4
 
 mkdir -p "${target_path}"
 
-# csc is baked into this sidecar image; no install step is required.
-csc --version || true
+# csc is baked into this sidecar image. Verify it is present and executable up
+# front so a broken/missing image fails immediately with a clear message
+command -v csc >/dev/null 2>&1 || { echo "ERROR: csc not found in tester image" >&2; exit 1; }
 
 # Wait for the driver container to create the CSI socket on the shared volume.
 echo "$(date -u) Waiting for CSI socket ${endpoint}"
