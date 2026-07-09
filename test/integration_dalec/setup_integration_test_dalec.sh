@@ -58,6 +58,10 @@ fatal_waiting_reason() {
         echo "ERROR: ${c} container is stuck in ${reason}; aborting." >&2
         return 0
         ;;
+      *)
+        # Empty or transient reason (ContainerCreating, PodInitializing, etc.):
+        # not fatal, keep waiting.
+        ;;
     esac
   done
   return 1
