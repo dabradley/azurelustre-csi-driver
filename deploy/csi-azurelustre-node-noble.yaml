@@ -168,7 +168,7 @@ spec:
             - name: LUSTRE_VERSION
               value: "2.17.0"
             - name: CLIENT_SHA_SUFFIX
-              value: "19-gbb5310f"
+              value: "24-gf517bc4"
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
