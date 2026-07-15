@@ -461,6 +461,83 @@ check_conditional_blocks() {
   return 0
 }
 
+check_workload_identity() {
+  local version=${1}
+  local chart_dir="./charts/${version}/azurelustre-csi-driver"
+  local rendered pod_label client_id tenant_id sa_name token_creds
+
+  echo "== Checking workload identity configuration for version: ${version} =="
+  if ! rendered=$(helm template --set "fullnameOverride=csi-azurelustre" \
+    --set "IdentityClientId=test-client-id" --namespace kube-system \
+    chart-test "${chart_dir}" 2>&1); then
+    echo "ERROR: helm template failed with workload identity disabled:"
+    echo "${rendered}"
+    return 1
+  fi
+  if grep -q 'azure.workload.identity' <<<"${rendered}"; then
+    echo "ERROR: workload identity metadata rendered while disabled"
+    return 1
+  fi
+  token_creds=$(printf '%s\n' "${rendered}" | yq eval 'select(.kind == "Deployment") | .spec.template.spec.containers[] | select(.name == "azurelustre") | .env[] | select(.name == "AZURE_TOKEN_CREDENTIALS") | .value' -)
+  if [[ "${token_creds}" != "ManagedIdentityCredential" ]]; then
+    echo "ERROR: controller must pin the credential to managed identity while workload identity is disabled, got '${token_creds}'"
+    return 1
+  fi
+
+  if rendered=$(helm template --set "IsWorkloadIdentityEnabled=Enabled" \
+    --namespace kube-system chart-test "${chart_dir}" 2>&1); then
+    echo "ERROR: workload identity rendered without IdentityClientId"
+    return 1
+  fi
+  if [[ "${rendered}" != *"IdentityClientId must be set"* ]]; then
+    echo "ERROR: missing IdentityClientId produced an unexpected error:"
+    echo "${rendered}"
+    return 1
+  fi
+
+  # A near-miss value must be rejected at render time: anything but an exact
+  # "Enabled" would otherwise skip both the label and the IdentityClientId guard.
+  if rendered=$(helm template --set "IsWorkloadIdentityEnabled=enabled" \
+    --set "IdentityClientId=test-client-id" --namespace kube-system \
+    chart-test "${chart_dir}" 2>&1); then
+    echo "ERROR: invalid IsWorkloadIdentityEnabled value rendered successfully"
+    return 1
+  fi
+  if [[ "${rendered}" != *"must be 'Enabled' or 'Disabled'"* ]]; then
+    echo "ERROR: invalid IsWorkloadIdentityEnabled produced an unexpected error:"
+    echo "${rendered}"
+    return 1
+  fi
+
+  if ! rendered=$(helm template --set "fullnameOverride=csi-azurelustre" \
+    --set "IsWorkloadIdentityEnabled=Enabled" --set "IdentityClientId=test-client-id" \
+    --set "IdentityTenantId=test-tenant-id" --namespace kube-system \
+    chart-test "${chart_dir}" 2>&1); then
+    echo "ERROR: helm template failed with workload identity enabled:"
+    echo "${rendered}"
+    return 1
+  fi
+  # The webhook injects AZURE_CLIENT_ID only for the SA the pod actually runs as,
+  # so read the name off the Deployment rather than assuming the default.
+  sa_name=$(printf '%s\n' "${rendered}" | yq eval 'select(.kind == "Deployment") | .spec.template.spec.serviceAccountName' -)
+  pod_label=$(printf '%s\n' "${rendered}" | yq eval 'select(.kind == "Deployment") | .spec.template.metadata.labels."azure.workload.identity/use"' -)
+  client_id=$(printf '%s\n' "${rendered}" | yq eval "select(.kind == \"ServiceAccount\" and .metadata.name == \"${sa_name}\") | .metadata.annotations.\"azure.workload.identity/client-id\"" -)
+  tenant_id=$(printf '%s\n' "${rendered}" | yq eval "select(.kind == \"ServiceAccount\" and .metadata.name == \"${sa_name}\") | .metadata.annotations.\"azure.workload.identity/tenant-id\"" -)
+  if [[ "${pod_label}" != "true" || "${client_id}" != "test-client-id" || "${tenant_id}" != "test-tenant-id" ]]; then
+    echo "ERROR: workload identity metadata did not render correctly"
+    printf 'pod label=%s, client ID=%s, tenant ID=%s\n' "${pod_label}" "${client_id}" "${tenant_id}"
+    return 1
+  fi
+
+  token_creds=$(printf '%s\n' "${rendered}" | yq eval 'select(.kind == "Deployment") | .spec.template.spec.containers[] | select(.name == "azurelustre") | .env[] | select(.name == "AZURE_TOKEN_CREDENTIALS") | .value' -)
+  if [[ "${token_creds}" != "WorkloadIdentityCredential" ]]; then
+    echo "ERROR: controller must pin the credential to workload identity, got '${token_creds}'"
+    return 1
+  fi
+
+  echo "Workload identity renders correctly (annotations land on ${sa_name})"
+}
+
 check_helm_lint() {
   # Run `helm lint` on the chart source.  Lint is the most fundamental
   # source-side check — if it fails, the rendering/diff work below is
@@ -603,6 +680,11 @@ for version in charts/*/; do
   if ! check_conditional_blocks "${version}"; then
     issues_found=true
     failures+=("Conditional pod metadata check (version: ${version})")
+  fi
+
+  if ! check_workload_identity "${version}"; then
+    issues_found=true
+    failures+=("Workload identity configuration check (version: ${version})")
   fi
 done
 

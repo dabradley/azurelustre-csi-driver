@@ -52,6 +52,7 @@ This document describes common errors that can occur during volume creation and 
 
 - Insufficient Azure RBAC permissions for kubelet identity
 - Incorrect identity configuration
+- Workload identity is enabled on the cluster but the controller ServiceAccount is missing its `azure.workload.identity/client-id` annotation, or the federated credential subject does not match the controller ServiceAccount
 
 **Debugging Steps:**
 
@@ -67,6 +68,7 @@ kubectl logs -n kube-system -l app=csi-azurelustre-controller -c azurelustre --t
 
 - Assign required RBAC roles to kubelet identity:
   - See [Permissions For Kubelet Identity](driver-parameters.md#Permissions%20For%20Kubelet%20Identity)
+- If using workload identity, ensure the controller ServiceAccount has the `azure.workload.identity/client-id` annotation and that the federated credential subject matches the controller ServiceAccount. The subject must be `system:serviceaccount:<namespace>:csi-azurelustre-controller-sa`. A partial injection (federated token file and tenant present but no client ID) produces `AADSTS70025`-style failures. See [Workload Identity](workload-identity.md).
 
 ---
 

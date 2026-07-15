@@ -101,6 +101,9 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | `rbac.create` | Create RBAC resources | `true` |
 | `csidriver.name` | CSIDriver name | `azurelustre.csi.azure.com` |
 | `csidriver.fsGroupPolicy` | FSGroupPolicy | `File` |
+| `IsWorkloadIdentityEnabled` | Enable controller workload identity | `Disabled` |
+| `IdentityClientId` | Workload identity client ID (required when enabled) | `""` |
+| `IdentityTenantId` | Optional cross-tenant workload identity tenant ID | `""` |
 | `paths.kubelet` | Host kubelet path | `/var/lib/kubelet` |
 | `paths.kubernetes` | Host Kubernetes config path | `/etc/kubernetes` |
 | `paths.dev` | Host /dev path | `/dev` |
