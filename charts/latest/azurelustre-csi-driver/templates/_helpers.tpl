@@ -51,7 +51,7 @@ Full entity names.
 {{- if .Values.serviceAccount.controller.name -}}
 {{ .Values.serviceAccount.controller.name }}
 {{- else -}}
-{{ include "azurelustre.fullname" . }}-controller-sa
+csi-azurelustre-controller-sa
 {{- end -}}
 {{- end -}}
 
@@ -59,7 +59,7 @@ Full entity names.
 {{- if .Values.serviceAccount.node.name -}}
 {{ .Values.serviceAccount.node.name }}
 {{- else -}}
-{{ include "azurelustre.fullname" . }}-node-sa
+csi-azurelustre-node-sa
 {{- end -}}
 {{- end -}}
 
