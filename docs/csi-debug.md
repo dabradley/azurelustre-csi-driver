@@ -836,6 +836,46 @@ kubectl logs -n kube-system -l app=csi-azurelustre-controller -c azurelustre --t
 
 Check [Find all skus and available zones for a location](csi-debug.md#Find_all_skus_and_available_zones_for_a_location). If the location is not supported for AMLFS, the output will be empty.
 
+### Workload Identity (Dynamic Provisioning)
+
+**Symptoms:**
+
+- Dynamic provisioning fails with authentication errors only on clusters that have workload identity enabled
+- Controller logs show token-exchange failures such as `AADSTS70021` or `AADSTS70025`
+- The client ID reported in ARM authorization errors is the node (kubelet) identity, not the identity you federated
+
+**Confirm what the controller is using:**
+
+```sh
+# The controller service account should carry the client-id annotation when WI is configured
+kubectl get serviceaccount csi-azurelustre-controller-sa -n kube-system -o yaml | grep -i "azure.workload.identity"
+
+# The controller pods should have the injected workload-identity env vars
+POD=$(kubectl get pod -n kube-system -l app=csi-azurelustre-controller -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n kube-system "$POD" -c azurelustre -- env | grep AZURE_
+```
+
+Expect `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_FEDERATED_TOKEN_FILE` to all be present. If `AZURE_CLIENT_ID` is missing while the other two are set, the ServiceAccount is missing its `azure.workload.identity/client-id` annotation.
+
+Confirm which identity the controller authenticates with:
+
+```sh
+kubectl logs -n kube-system -l app=csi-azurelustre-controller -c azurelustre --tail=300 | grep -i "authenticating with"
+# expect: authenticating with workload identity (client ID "<client-id>")
+```
+
+`authenticating with managed identity` means workload identity was not enabled on the chart. With it enabled, `AZURE_TOKEN_CREDENTIALS=WorkloadIdentityCredential` restricts the controller to that one credential with no managed-identity fallback, so if the webhook did not inject `AZURE_FEDERATED_TOKEN_FILE` the log instead reads `configured for workload identity but AZURE_FEDERATED_TOKEN_FILE is not set` and Azure calls fail until that is fixed.
+
+Only the controller authenticates to Azure. Node pods never call ARM, so they build no credential and log no identity line.
+
+**Common causes:**
+
+- `IsWorkloadIdentityEnabled` was not set to `Enabled`, so no annotation or label is rendered. Reinstall or upgrade with `--set IsWorkloadIdentityEnabled=Enabled --set IdentityClientId=<client-id>` (see [Workload Identity](workload-identity.md)).
+- The federated credential subject does not match the controller ServiceAccount. It must be `system:serviceaccount:<namespace>:csi-azurelustre-controller-sa`.
+- The identity referenced by `IdentityClientId` lacks the required AMLFS permissions. It needs the same permissions listed under [Permissions For Kubelet Identity](driver-parameters.md#permissions-for-kubelet-identity).
+
+Check for solutions in [Resolving Common Errors](errors.md#authentication-and-authorization-errors)
+
 ---
 
 ### Static Provisioning (Pre-existing Volumes)
