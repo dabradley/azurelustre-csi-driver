@@ -131,13 +131,6 @@ node:
 rbac:
   create: true
 
-serviceAccount:
-  create: true
-  controller:
-    name: ""
-  node:
-    name: ""
-
 csidriver:
   name: azurelustre.csi.azure.com
   fsGroupPolicy: File

@@ -510,6 +510,39 @@ check_deploy_version_labels() {
   return 0
 }
 
+check_service_account_names() {
+  # Render WITHOUT fullnameOverride on purpose: the defaults are hardcoded
+  # literals (the controller default is the AKS extension's fixed
+  # federated-credential subject), so only a plain render distinguishes them
+  # from the older "{{ fullname }}-*-sa" form.
+  local version=${1}
+  local chart_dir="./charts/${version}/azurelustre-csi-driver"
+  local rendered ctrl node
+
+  echo "== Checking ServiceAccount names for version: ${version} =="
+
+  rendered=$(helm template --namespace kube-system chart-test "${chart_dir}")
+  ctrl=$(yq eval 'select(.kind == "Deployment") | .spec.template.spec.serviceAccountName' - <<<"${rendered}")
+  node=$(yq ea '[select(.kind == "DaemonSet") | .spec.template.spec.serviceAccountName] | unique | .[]' - <<<"${rendered}")
+  if [[ "${ctrl}" != "csi-azurelustre-controller-sa" || "${node}" != "csi-azurelustre-node-sa" ]]; then
+    echo "ERROR: default SA names wrong: controller='${ctrl}', node='${node}'"
+    return 1
+  fi
+
+  # The names are fixed by design, so an attempted override must be ignored.
+  rendered=$(helm template --namespace kube-system chart-test "${chart_dir}" \
+    --set "serviceAccount.controller.name=custom-controller-sa" \
+    --set "serviceAccount.node.name=custom-node-sa")
+  ctrl=$(yq eval 'select(.kind == "Deployment") | .spec.template.spec.serviceAccountName' - <<<"${rendered}")
+  node=$(yq ea '[select(.kind == "DaemonSet") | .spec.template.spec.serviceAccountName] | unique | .[]' - <<<"${rendered}")
+  if [[ "${ctrl}" != "csi-azurelustre-controller-sa" || "${node}" != "csi-azurelustre-node-sa" ]]; then
+    echo "ERROR: SA names must not be overridable: controller='${ctrl}', node='${node}'"
+    return 1
+  fi
+
+  echo "ServiceAccount names render correctly (fixed, not overridable)"
+}
+
 echo "Verifying helm chart files against deploy yamls ..."
 
 issues_found=false
@@ -560,6 +593,11 @@ for version in charts/*/; do
   if ! check_version_label "${version}"; then
     issues_found=true
     failures+=("Version label consistency check (version: ${version})")
+  fi
+
+  if ! check_service_account_names "${version}"; then
+    issues_found=true
+    failures+=("ServiceAccount name check (version: ${version})")
   fi
 
   if ! check_conditional_blocks "${version}"; then
