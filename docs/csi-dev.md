@@ -1,10 +1,23 @@
 # Azure azurelustre Storage CSI driver development guide
 
-&nbsp;
+## Make targets
+
+| Target | Description |
+| --- | --- |
+| `make azurelustre` | Full rebuild of the binary (`-a` flag) |
+| `make quicklustre` | Incremental build (faster for iteration) |
+| `make container` | Full build + per-flavor docker images. Common CSI driver testing target. |
+| `make docker-build` | Build per-flavor docker images only. Run after the Go binary already exists, e.g. `make quicklustre docker-build`. |
+| `make build-push-latest` | Build the binary + per-flavor images + push with `latest` tag |
+| `make build-push-latest-commit` | Build + push both `latest` and commit-tagged images |
+| `make verify` | Run all checks (lint, vet, unit tests, etc.) |
+| `make unit-test` | Unit tests only |
+| `make sanity-test-local` | Sanity tests without Lustre hardware or Azure credentials |
+| `make e2e-test` | E2E tests (requires `LUSTRE_FS_NAME`, `LUSTRE_MGS_IP`) |
+| `make helm-chart-packages` | Repackage Helm charts + update index |
+| `make clean` | Remove build artifacts |
 
 ## Clone repo and build locally
-
-&nbsp;
 
 - Clone repo
 
@@ -13,8 +26,6 @@ mkdir -p $GOPATH/src/sigs.k8s.io
 git clone https://github.com/kubernetes-sigs/azurelustre-csi-driver $GOPATH/src/sigs.k8s.io/azurelustre-csi-driver
 ```
 
-&nbsp;
-
 - Build azurelustre Storage CSI driver
 
 ```sh
@@ -22,15 +33,21 @@ cd $GOPATH/src/sigs.k8s.io/azurelustre-csi-driver
 make azurelustre
 ```
 
-&nbsp;
+For faster iteration during development, use the quick build which skips the
+`-a` (rebuild-all) flag and only recompiles changed packages:
+
+```sh
+make quicklustre
+```
+
+> **Note:** The build defaults to `CGO_ENABLED=1` and requires a C compiler
+> (`gcc`) to be installed.
 
 - Run verification before sending PR
 
 ```sh
 make verify
 ```
-
-&nbsp;
 
 - Update the Helm chart index after changing charts
 
@@ -93,10 +110,72 @@ az acr task create --name purge-old-images \
     --schedule "0 4 * * 0" --context /dev/null
 ```
 
+Each container build produces two images — one for each Ubuntu flavor:
+`-jammy` (Ubuntu 22.04) and `-noble` (Ubuntu 24.04). Choose the one matching
+your cluster's node OS when deploying.
+
+For faster iteration, use the quick variant which does an incremental Go
+build before the docker step:
+
+```sh
+REGISTRY="<alias>csiacr.azurecr.io" make quicklustre push-latest
+```
+
+To cross-build for a different architecture:
+
+```sh
+ARCH=arm64 REGISTRY="<alias>csiacr.azurecr.io" make build-push-latest
+```
+
+**Key Makefile variable overrides:**
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `REGISTRY` | `azurelustre.azurecr.io` | Container registry to push to |
+| `IMAGE_VERSION` | `latest` | Image version tag |
+| `LATEST_TAG` | `latest` | The "latest" alias tag (e.g., `my-feature`) |
+| `ARCH` | `amd64` | Target architecture (`amd64`, `arm64`) |
+
 Note: This builds images from the local Dockerfile for development and testing.
 Production images are built through DALEC (see below).
 
-&nbsp;
+- Run the Kubernetes external storage e2e tests
+
+The `e2e-test` target installs the driver from the local Helm chart, runs the
+e2e test suite, and cleans up afterwards. You need a running cluster with
+`kubectl` configured and a Lustre filesystem accessible from the cluster:
+
+```sh
+make e2e-test LUSTRE_FS_NAME=<fs-name> LUSTRE_MGS_IP=<mgs-ip>
+```
+
+Or run the script directly for more options (custom image, skip install/cleanup, etc.):
+
+```sh
+hack/e2e-test.sh --lustre-fs-name <fs-name> --lustre-mgs-ip <mgs-ip> --help
+```
+
+- Run unit tests
+
+`make verify` runs linters, vet, and unit tests together. If you only want to
+run the unit tests (e.g., iterating on a specific test without waiting for
+linters), run them directly:
+
+```sh
+make unit-test
+```
+
+- Test locally without Lustre hardware or Azure credentials
+
+The sanity test suite exercises the CSI driver's gRPC endpoints with both
+mock-mount and mock-dynamic-provisioning enabled, so it requires neither a
+real Lustre filesystem nor an `azure.json` credential file:
+
+```sh
+make sanity-test-local
+```
+
+This is the fastest way to validate driver behavior during development.
 
 ## DALEC image builds
 
@@ -112,26 +191,20 @@ For local iteration, build and run the image from the Dockerfile with
 `make container`. The DALEC images are produced during the release process — see
 [RELEASE.md](../RELEASE.md) for the full release and tagging flow.
 
-&nbsp;
-&nbsp;
+## Advanced: manual testing with csc
 
-## Test locally using csc tool
+For most local testing, `make sanity-test-local` (described above) is the
+fastest option. For step-by-step debugging of individual CSI RPCs, you can
+use the `csc` CLI tool instead.
 
-&nbsp;
+> **Note:** The `csc` tool comes from [rexray/gocsi](https://github.com/rexray/gocsi)
+> which is archived but still installable.
 
-- Install CSC
+- Install csc
 
-Install `csc` tool according to <https://github.com/rexray/gocsi/tree/master/csc>:
-
-```console
-mkdir -p $GOPATH/src/github.com
-cd $GOPATH/src/github.com
-git clone https://github.com/rexray/gocsi.git
-cd rexray/gocsi/csc
-make build
+```sh
+go install github.com/rexray/gocsi/csc@latest
 ```
-
-&nbsp;
 
 - Setup variables
 
@@ -141,78 +214,56 @@ readonly cap="MULTI_NODE_MULTI_WRITER,mount,,,"
 readonly target_path="/tmp/lustre-pv"
 readonly endpoint="tcp://127.0.0.1:10000"
 
-readonly lustre_fs_name=""
-readonly lustre_fs_ip=""
+readonly lustre_fs_name="<your-lustre-fs-name>"
+readonly lustre_fs_ip="<your-mgs-ip>"
 ```
-
-&nbsp;
 
 - Start CSI driver locally
 
-```console
-cd $GOPATH/src/sigs.k8s.io/azurelustre-csi-driver
+The driver requires an Azure cloud config file (`azure.json`) to initialize.
+Without it, the driver will fatally exit unless mock dynamic provisioning is
+enabled. Copy the file from a Kubernetes node or create one with your
+subscription details:
+
+```sh
+export AZURE_CONFIG_FILE=/etc/kubernetes/azure.json
 ./_output/azurelustreplugin --endpoint $endpoint --nodeid CSINode -v=5 &
 ```
 
-> Before running CSI driver, create "/etc/kubernetes/azure.json" file under testing server(it's better copy `azure.json` file from a k8s cluster with service principle configured correctly) and set `AZURE_CREDENTIAL_FILE` as following:
+Alternatively, to skip the cloud config requirement and use mock dynamic
+provisioning:
 
-```console
-export AZURE_CREDENTIAL_FILE=/etc/kubernetes/azure.json
+```sh
+./_output/azurelustreplugin --endpoint $endpoint --nodeid CSINode \
+    --enable-azurelustre-mock-mount --enable-azurelustre-mock-dyn-prov -v=5 &
 ```
 
-&nbsp;
+- Exercise CSI RPCs
 
-### 1. Get plugin info
-
-```console
+```sh
+# Get plugin info
 csc identity plugin-info --endpoint $endpoint
-```
 
-&nbsp;
+# Create a volume
+csc controller new --endpoint $endpoint --cap $cap \
+    --req-bytes 2147483648 \
+    --params "fs-name=$lustre_fs_name,mgs-ip-address=$lustre_fs_ip" $volname
 
-#### 2. Create an azurelustre volume
+# Publish (mount) the volume
+mkdir -p $target_path
+csc node publish --endpoint $endpoint --cap $cap \
+    --target-path $target_path \
+    --vol-context "fs-name=$lustre_fs_name,mgs-ip-address=$lustre_fs_ip" $volname
 
-```console
-csc controller new --endpoint $endpoint --cap $cap --req-bytes 2147483648 --params "fs-name=$lustre_fs_name,mgs-ip-address=$lustre_fs_ip" $volname
-```
-
-&nbsp;
-
-#### 3. Publish volume
-
-```console
-mkdir /tmp/target-path
-volumeid=$(csc node publish --endpoint $endpoint --cap $cap --target-path $target_path --vol-context "fs-name=$lustre_fs_name,mgs-ip-address=$lustre_fs_ip" $volname)
-```
-
-&nbsp;
-
-#### 4. Unpublish volume
-
-```console
+# Unpublish (unmount) the volume
 csc node unpublish --endpoint $endpoint --target-path $target_path $volname
-```
 
-&nbsp;
+# Delete the volume
+csc controller del --endpoint $endpoint $volname
 
-#### 5. Delete azurelustre volume
+# Validate volume capabilities
+csc controller validate-volume-capabilities --endpoint $endpoint --cap $cap $volname
 
-```console
-csc controller del --endpoint $endpoint volumeid
-```
-
-&nbsp;
-
-#### 6. Validate volume capabilities
-
-```console
-csc controller validate-volume-capabilities --endpoint $endpoint --cap $cap volumeid
-```
-
-&nbsp;
-
-#### 7. Get NodeID
-
-```console
+# Get node info
 csc node get-info --endpoint $endpoint
 ```

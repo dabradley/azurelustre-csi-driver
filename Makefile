@@ -25,7 +25,6 @@ COMMIT_TAG ?= $(LATEST_TAG)-$(GIT_COMMIT)
 IMAGE_TAG_COMMIT = $(REPOSITORY):$(COMMIT_TAG)
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS ?= "-X ${PKG}/pkg/azurelustre.driverVersion=${IMAGE_VERSION} -X ${PKG}/pkg/azurelustre.gitCommit=${GIT_COMMIT} -X ${PKG}/pkg/azurelustre.buildDate=${BUILD_DATE} -s -w -extldflags '-static'"
-GINKGO_FLAGS = -ginkgo.v
 GO111MODULE = on
 GOPATH ?= $(shell go env GOPATH)
 GOBIN ?= $(GOPATH)/bin
@@ -109,11 +108,7 @@ sanity-test-local:
 
 .PHONY: e2e-test
 e2e-test:
-	if [ ! -z "$(EXTERNAL_E2E_TEST_AZURELUSTRE)" ]; then \
-		bash ./test/external-e2e/run.sh;\
-	else \
-		go test -v -timeout=0 ./test/e2e ${GINKGO_FLAGS};\
-	fi
+	hack/e2e-test.sh
 
 .PHONY: helm-chart-packages
 helm-chart-packages:

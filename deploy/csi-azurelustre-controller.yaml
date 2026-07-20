@@ -20,6 +20,8 @@ spec:
     metadata:
       annotations:
         cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "29764"
       labels:
         app: csi-azurelustre-controller
         app.kubernetes.io/component: controller
@@ -143,14 +145,14 @@ spec:
           args:
             - -v=5
             - --endpoint=$(CSI_ENDPOINT)
+            - --metrics-address=0.0.0.0:29764
           ports:
             - containerPort: 29762
               name: healthz
               protocol: TCP
-          # Reserved port for metrics
-          # - containerPort: 29764
-          #   name: metrics
-          #   protocol: TCP
+            - containerPort: 29764
+              name: metrics
+              protocol: TCP
           livenessProbe:
             failureThreshold: 5
             httpGet:

@@ -23,6 +23,9 @@ spec:
       flavor: noble
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "29765"
       labels:
         app.kubernetes.io/component: node
         app.kubernetes.io/name: azurelustre-csi-driver
@@ -128,14 +131,14 @@ spec:
             - -v=5
             - --endpoint=$(CSI_ENDPOINT)
             - --nodeid=$(KUBE_NODE_NAME)
+            - --metrics-address=0.0.0.0:29765
           ports:
             - containerPort: 29763
               name: healthz
               protocol: TCP
-          # Reserved port for metrics
-          # - containerPort: 29765
-          #   name: metrics
-          #   protocol: TCP
+            - containerPort: 29765
+              name: metrics
+              protocol: TCP
           livenessProbe:
             failureThreshold: 5
             httpGet:

@@ -46,6 +46,7 @@ sidecars:
 
 controller:
   replicas: 2
+  metricsPort: 29764
   resources:
     limits:
       cpu: 1
@@ -71,6 +72,7 @@ controller:
   extraArgs: ["-v=5"]
 
 node:
+  metricsPort: 29765
   tolerations:
     - operator: "Exists"
   updateStrategy:
@@ -149,6 +151,15 @@ nameOverride: ""
 fullnameOverride: ""
 podAnnotations: {}
 podLabels: {}
+
+metrics:
+  service:
+    enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 15s
+    labels: {}
+
 paths:
   kubelet: /var/lib/kubelet
   kubernetes: /etc/kubernetes

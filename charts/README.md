@@ -88,8 +88,10 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | `controller.replicas` | Controller replicas | `2` |
 | `controller.priorityClassName` | Controller pod priority class | `system-cluster-critical` |
 | `controller.extraArgs` | Extra args passed to controller driver | `["-v=5"]` |
+| `controller.metricsPort` | Metrics port for controller | `29764` |
 | `node.priorityClassName` | Node pod priority class | `system-node-critical` |
 | `node.updateStrategy.maxUnavailable` | Max node pods unavailable during a rolling update | `10%` |
+| `node.metricsPort` | Metrics port for node | `29765` |
 | `node.lustreClient.install` | Install Lustre client on nodes | `true` |
 | `node.jammy.lustreClient.version` | Lustre client version for jammy flavor | `2.15.8` |
 | `node.jammy.lustreClient.shaSuffix` | Lustre client SHA suffix for jammy flavor | `34-gc0f2040` |
@@ -107,7 +109,11 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | `paths.dev` | Host /dev path | `/dev` |
 | `paths.osRelease` | Host OS release file | `/etc/os-release` |
 | `imagePullSecrets` | Image pull secrets array | `[]` |
+| `metrics.service.enabled` | Create ClusterIP Service for metrics endpoints | `false` |
+| `metrics.serviceMonitor.enabled` | Create ServiceMonitor for Prometheus Operator | `false` |
+| `metrics.serviceMonitor.interval` | Prometheus scrape interval | `15s` |
+| `metrics.serviceMonitor.labels` | Extra labels on ServiceMonitor resources | `{}` |
 
 For full parameter set see `charts/latest/azurelustre-csi-driver/values.yaml`.
 
-For development details see repository root `README.md` and docs in `docs/`.
+For metrics configuration details see [docs/metrics.md](../docs/metrics.md).
