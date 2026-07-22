@@ -14,7 +14,7 @@ image under test, and exercises the CSI API with the
 The test runs a single Pod with **two containers** that share the CSI socket
 through an `emptyDir` volume mounted at `/csi`:
 
-```
+```text
         Pod: azurelustre-integration-dalec
  +-----------------------------------------------+
  |  driver container         tester container    |
@@ -40,7 +40,7 @@ package manager or Go toolchain. The `csc` image is never shipped.
 ## Files
 
 | File | Purpose |
-|---|---|
+| --- | --- |
 | `Dockerfile.csc` | Builds the test-only `csc` sidecar image (never shipped). |
 | `run_integration_test.sh` | Runs **inside** the `tester` container: waits for the socket, runs the `csc` create/validate/publish/stats/unpublish/delete/identity/get-info sequence. |
 | `integration_dalec_aks.yaml.template` | Two-container Pod (`driver` + `tester`) sharing the CSI socket. |
