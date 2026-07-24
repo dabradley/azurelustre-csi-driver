@@ -94,9 +94,9 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | `node.jammy.lustreClient.version` | Lustre client version for jammy flavor | `2.15.8` |
 | `node.jammy.lustreClient.shaSuffix` | Lustre client SHA suffix for jammy flavor | `34-gc0f2040` |
 | `node.noble.lustreClient.version` | Lustre client version for noble flavor | `2.17.0` |
-| `node.noble.lustreClient.shaSuffix` | Lustre client SHA suffix for noble flavor | `19-gbb5310f` |
+| `node.noble.lustreClient.shaSuffix` | Lustre client SHA suffix for noble flavor | `24-gf517bc4` |
 | `node.azurelinux3.lustreClient.version` | Lustre client version for azurelinux3 flavor | `2.17.0` |
-| `node.azurelinux3.lustreClient.shaSuffix` | Lustre client SHA suffix for azurelinux3 flavor | `19-gbb5310f` |
+| `node.azurelinux3.lustreClient.shaSuffix` | Lustre client SHA suffix for azurelinux3 flavor | `24-gf517bc4` |
 | `node.extraArgs` | Extra args passed to node driver | `["-v=5"]` |
 | `rbac.create` | Create RBAC resources | `true` |
 | `serviceAccount.create` | Create ServiceAccount resources | `true` |
