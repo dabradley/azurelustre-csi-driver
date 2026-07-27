@@ -232,7 +232,8 @@ There is not enough room in the /subscriptions/<sub-id>/resourceGroups/<rg>/prov
 **Possible Causes:**
 
 - CSI driver is still initializing on nodes
-- Lustre kernel modules are not yet loaded
+- Lustre kernel modules are not yet loaded (the `lustre-loader` startup sidecar is still bringing up LNet)
+- The `azurelustre` driver is still installing its userspace tools, so its CSI socket is not yet serving
 - CSI driver failed to start properly on affected nodes
 - Node is not ready to handle Azure Lustre volume allocations
 - CSI driver startup taint removal is disabled
@@ -249,7 +250,14 @@ kubectl describe nodes | grep -A5 -B5 "azurelustre.csi.azure.com/agent-not-ready
 # Verify CSI driver pod status on nodes
 kubectl get pods -n kube-system -l app=csi-azurelustre-node -o wide
 
-# Check CSI driver startup logs
+# Node pods are 4/4 when ready. If below 4/4, find which container is not ready:
+# the lustre-loader sidecar (LNet) and/or the azurelustre driver (CSI socket).
+kubectl get pod -n kube-system <pod-name> -o jsonpath='{range .status.initContainerStatuses[*]}{.name}={.ready}{"\n"}{end}{range .status.containerStatuses[*]}{.name}={.ready}{"\n"}{end}'
+
+# Check the loader sidecar's LNet readiness directly
+kubectl exec -n kube-system <pod-name> -c lustre-loader -- /app/readinessProbe.sh
+
+# Check CSI driver startup logs (taint removal is performed by the driver container)
 kubectl logs -n kube-system -l app=csi-azurelustre-node -c azurelustre --tail=100 | grep -i "taint\|ready\|error"
 
 # Verify taint removal is enabled (should be true by default)
@@ -270,15 +278,16 @@ kubectl logs -n kube-system -l app=csi-azurelustre-node -c azurelustre | grep -i
 2. **Check Lustre Module Loading**:
 
    ```bash
-   # Verify Lustre modules are loaded on nodes
-   kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lsmod | grep lustre
+   # Verify Lustre modules are loaded on nodes (modules are loaded by the loader sidecar)
+   kubectl exec -n kube-system <csi-azurelustre-node-pod> -c lustre-loader -- lsmod | grep lustre
    ```
 
 3. **Verify CSI Driver Configuration**:
 
    ```bash
-   # Check if taint removal is enabled (default: true)
-   kubectl get deployment csi-azurelustre-node -n kube-system -o yaml | grep "remove-not-ready-taint"
+   # Check if taint removal is enabled (default: true). The node runs as per-OS-flavor
+   # DaemonSets; check the one for the affected node's OS (jammy/noble/azurelinux3).
+   kubectl get ds csi-azurelustre-node-jammy -n kube-system -o yaml | grep "remove-not-ready-taint"
    ```
 
 4. **Emergency Manual Taint Removal** (not recommended for production):
