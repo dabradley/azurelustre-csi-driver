@@ -32,22 +32,23 @@ make verify
 
 &nbsp;
 
-- Update the Helm chart index after changing charts
+- Verify Helm chart source changes
 
-If you modify any chart templates or values, repackage the charts and regenerate
-the index:
+The repository stores one unpackaged chart source at
+`charts/latest/azurelustre-csi-driver`. Keep its `Chart.yaml` version at
+`0.0.0`, its `appVersion` at `latest`, and `values.yaml` `image.tag` at
+`latest`. Run `make verify` after changing templates or values.
 
-```sh
-make helm-chart-packages
-```
+Do not commit chart archives, an index, or versioned chart directories. The
+clients Ev2 release pipeline clones a reviewed commit, applies release metadata
+to a temporary copy, and publishes the released chart to MCR as an OCI
+artifact.
 
-Or equivalently:
-
-```sh
-hack/update-helm-chart-packages.sh
-```
-
-The `make verify` step will fail if the packages or index are out of date.
+The Helm chart version and CSI driver version are independent. Ev2 receives a
+bare chart/extension version such as `A.B.C` and a separate driver image family
+such as `vX.Y.Z`. It writes `A.B.C` to the chart `version`, and writes `vX.Y.Z`
+to `appVersion` and `image.tag`. `appVersion` is informational; `image.tag`
+selects the actual flavored images. Never derive either input from the other.
 
 - Build container image locally for testing
 
@@ -103,10 +104,17 @@ Production images are built through DALEC (see below).
 Production images are built through [DALEC](https://github.com/Azure/dalec-build-defs),
 not from the Dockerfiles in this repo. The Dockerfiles
 (`pkg/azurelustreplugin/Dockerfile`) are only for local development and testing;
-released images come from hand-authored DALEC specs under
-`specs/kubernetes-csi-azurelustre/` in the dalec-build-defs repo — one spec per
-version, per OS flavor, with no template/matrix generation for this project.
-Each spec pins a `COMMIT` from this repo and builds with `make azurelustre-dalec`.
+released images come from generated DALEC specs under
+`specs/kubernetes-csi-azurelustre/` in the dalec-build-defs repo. The project has
+separate templates for Azure Linux 3, Ubuntu Jammy, and Ubuntu Noble, with a
+`matrix.yml` that controls generation. Each generated spec pins the commit for
+an upstream CSI tag and builds with `make azurelustre-dalec`.
+
+Stable and prerelease tags trigger separate generated-spec PRs. For example,
+`v0.5.0-rc.1` is represented as `0.5.0~rc.1` in the DALEC spec and produces
+images tagged `v0.5.0-rc.1-<flavor>`. Generated-spec PRs require human review.
+The project also opts into Go module vulnerability scanning; its CVE remediation
+PRs require human review as well.
 
 For local iteration, build and run the image from the Dockerfile with
 `make container`. The DALEC images are produced during the release process — see

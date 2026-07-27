@@ -2,17 +2,24 @@
 
 This document explains how to install Azure Lustre CSI driver on a kubernetes cluster.
 
-## Instructions for current production release
+## Install a released version
 
 ### Install with Helm (recommended)
 
-Helm is the recommended installation method for production clusters.
+Helm is the recommended installation method for production clusters. Released
+charts are OCI artifacts in MCR. Set `CHART_VERSION` to the exact Helm chart
+version (`A.B.C`) in the Helm README's
+[released-chart table](../charts/README.md#released-chart-versions).
+The table maps each chart version to its independent driver image family.
+The chart's `appVersion` reports that driver release as informational metadata;
+`image.tag` selects the driver image family.
 
 ```shell
-helm repo add azurelustre-csi-driver https://raw.githubusercontent.com/kubernetes-sigs/azurelustre-csi-driver/main/charts
-helm repo update
-helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver \
-  --namespace kube-system --create-namespace --version 0.5.0
+CHART_VERSION=A.B.C
+helm install azurelustre \
+  oci://mcr.microsoft.com/microsoft.azuremanagedlustre/azurelustre-csi-driver \
+  --namespace kube-system --create-namespace \
+  --version "${CHART_VERSION}"
 ```
 
 To upgrade:
@@ -24,7 +31,11 @@ To upgrade:
 > and the kernel refuses to unload them while any Lustre filesystem is mounted.
 
 ```shell
-helm upgrade azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system
+CHART_VERSION=A.B.C
+helm upgrade azurelustre \
+  oci://mcr.microsoft.com/microsoft.azuremanagedlustre/azurelustre-csi-driver \
+  --namespace kube-system \
+  --version "${CHART_VERSION}"
 ```
 
 To uninstall:
@@ -44,8 +55,11 @@ helm uninstall azurelustre -n kube-system
 >
 > ```shell
 > ./deploy/uninstall-driver.sh
-> helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver \
->   --namespace kube-system --create-namespace --version 0.5.0
+> CHART_VERSION=A.B.C
+> helm install azurelustre \
+>   oci://mcr.microsoft.com/microsoft.azuremanagedlustre/azurelustre-csi-driver \
+>   --namespace kube-system --create-namespace \
+>   --version "${CHART_VERSION}"
 > ```
 
 For the full list of configurable values, version history, and advanced Helm usage, see the [Helm chart README](../charts/README.md).
