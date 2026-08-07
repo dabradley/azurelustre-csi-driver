@@ -170,6 +170,7 @@ type Driver struct {
 	resourceGroup      string
 	location           string
 	dynamicProvisioner DynamicProvisionerInterface
+	pingChecker        clusterPingChecker
 
 	removeNotReadyTaint bool
 	kubeClient          kubernetes.Interface
@@ -256,6 +257,10 @@ func NewDriver(options *DriverOptions) (*Driver, error) {
 				return nil, err
 			}
 		}
+	}
+
+	if d.pingChecker, err = newClusterPingCache(&util.DefaultCommandRunner{}); err != nil {
+		klog.Fatalf("%v", err)
 	}
 
 	return &d, nil

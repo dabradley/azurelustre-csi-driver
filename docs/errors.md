@@ -17,6 +17,7 @@ This document describes common errors that can occur during volume creation and 
 - [Volume Mounting Errors](#volume-mounting-errors)
   - [Node Mount Errors](#node-mount-errors)
     - [Error: Could not mount target](#error-could-not-mount-target)
+    - [Error: MGS IP address is not reachable](#error-mgs-ip-address-is-not-reachable)
     - [Error: Context sub-dir must be strict subpath](#error-context-sub-dir-must-be-strict-subpath)
 - [Configuration Errors](#configuration-errors)
   - [StorageClass Parameter Errors](#storageclass-parameter-errors)
@@ -341,6 +342,48 @@ kubectl get pv <pv-name> -o jsonpath='{.spec.csi.volumeAttributes.mgs-ip-address
 - Validate MGS IP address is correct and reachable
 - Check firewall rules and network security groups
 - Add NSG rules to allow AMLFS traffic if necessary
+
+---
+
+#### Error: MGS IP address is not reachable
+
+**Symptoms:**
+
+- Pod fails to start and stays in `ContainerCreating` status
+- Before mounting, the driver checks reachability in two stages: a fast TCP dial to the LNet acceptor port (default `988`), then an `lnetctl ping`. A wrong or unreachable MGS IP fails the dial within about 5 seconds. If a port is open but the peer is not a healthy LNet endpoint, the `lnetctl ping` stage can take up to about 50 seconds before failing (the LNet handshake is an in-kernel wait that cannot be shortened).
+- `NodePublishVolume` fails with:
+  - `MGS IP address "10.10.10.10" is not reachable; verify the cluster IP address and node network configuration are correct (if the cluster was only briefly unreachable, the operation will recover on retry)`
+- Error code: `FailedPrecondition`
+- Node logs show either `LNet reachability gate: dial to <mgs-ip>:988 failed` or `lnetctl ping to <mgs-ip>@tcp failed with error`
+
+**Possible Causes:**
+
+- Incorrect MGS IP address in the PersistentVolume or StorageClass
+- Missing or misconfigured virtual network peering or routing between the cluster and the AMLFS cluster
+- Network security group or firewall blocking LNet (TCP) traffic to the MGS
+- The AMLFS cluster is stopped, deleting, or otherwise temporarily unreachable
+- LNet is not configured correctly on the node (see [CSI Driver Troubleshooting Guide](csi-debug.md))
+
+**Debugging Steps:**
+
+```bash
+# Verify the MGS IP recorded on the volume
+kubectl get pv <pv-name> -o jsonpath='{.spec.csi.volumeAttributes.mgs-ip-address}'
+
+# Look for the reachability failure in the node driver logs
+kubectl logs -n kube-system csi-azurelustre-node-<pod> -c azurelustre --tail=300 | grep -iE 'reachability|ping'
+
+# Reproduce the reachability check from the node pod
+kubectl exec -n kube-system csi-azurelustre-node-<pod> -c azurelustre -- lnetctl ping <mgs-ip>@tcp
+```
+
+**Resolution:**
+
+- Correct the MGS IP address in the PersistentVolume or StorageClass if it is wrong
+- Verify virtual network peering and routing between the cluster and the AMLFS cluster
+- Add NSG or firewall rules to allow LNet (TCP) traffic to the MGS
+- Confirm the AMLFS cluster is running and healthy in the Azure portal
+- The check result is cached briefly (about 20 seconds); once connectivity is restored, the operation will recover on retry
 
 ---
 
