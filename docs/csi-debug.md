@@ -4,170 +4,225 @@
 
 ## Driver Readiness and Health Issues
 
-### Enhanced LNet Validation Troubleshooting
+> **Node pod container model (read this first).** Each `csi-azurelustre-node`
+> pod runs four containers, and **which container you target with `-c` matters**
+> for every command below:
+>
+> | Container | Role | Probes | Look here for |
+> | --------- | ---- | ------ | ------------- |
+> | `lustre-loader` | native sidecar (init container with `restartPolicy: Always`) that loads the Lustre kernel modules + brings up LNet, then runs an LNet reconcile loop for the life of the pod | `startupProbe` + `readinessProbe` = `/app/readinessProbe.sh` (LNet health); `livenessProbe` = `test -d /sys/module/lnet` | kernel modules, LNet/NIDs, metapackage install |
+> | `azurelustre` | CSI driver: installs userspace tools, then serves the gRPC socket | `startupProbe` + `livenessProbe` = `/healthz` (port 29763); `readinessProbe` = `test -S /csi/csi.sock` | userspace utils install, mounts, gRPC/CSI logs |
+> | `liveness-probe` | exposes the driver `/healthz` to the kubelet | — | — |
+> | `node-driver-registrar` | registers the driver socket with the kubelet | registration `livenessProbe` | kubelet registration |
+>
+> A node pod is `Ready` (`4/4`) only when the `lustre-loader` sidecar reports
+> LNet healthy **and** the `azurelustre` driver socket is serving. LNet and
+> kernel-module troubleshooting targets `-c lustre-loader`; mount and CSI driver
+> troubleshooting targets `-c azurelustre`.
+
+### LNet readiness troubleshooting (loader sidecar)
 
 **Symptoms:**
 
-- CSI driver node pods show `2/3` ready status
-- Readiness probe failing repeatedly
-- Pods remain in `Running` or startup issues
+- CSI driver node pods show less than `4/4` ready, or stay in `Init:` for a long time
+- The `lustre-loader` sidecar's readiness/startup probe fails repeatedly
+- Pods requiring Lustre volumes stay `Pending` because the node never becomes Ready
 - Mount operations fail with "driver not ready" errors
 
-#### Detailed Probe Verification Steps
-
-If the exec-based readiness probe fails (exit code 1), use these detailed verification steps:
+#### Probe configuration
 
 ```sh
-# Verify detailed probe configuration
 kubectl describe -n kube-system pod -l app=csi-azurelustre-node
 ```
 
-Look for exec-based probe configuration in the pod description:
+In the `lustre-loader` init container you should see:
 
-- `Readiness: exec [/app/readinessProbe.sh]`
 - `Startup: exec [/app/readinessProbe.sh]`
+- `Readiness: exec [/app/readinessProbe.sh]`
+- `Liveness: exec [/bin/sh -c test -d /sys/module/lnet]`
 
-In the Events section, you may see initial startup probe failures during LNet initialization:
+and in the `azurelustre` container:
 
-- `Warning Unhealthy ... Startup probe failed: Node pod detected - performing Lustre-specific readiness checks`
+- `Startup: http-get http://:healthz/healthz`
+- `Readiness: exec [/bin/sh -c test -S /csi/csi.sock]`
+- `Liveness: http-get http://:healthz/healthz`
 
-This is normal during the initialization phase. Once LNet is fully operational, the probes will succeed.
+During initial startup it is normal to see the loader's startup probe fail a few
+times while LNet comes up; once LNet is operational the probes succeed and the
+gated `azurelustre` and `node-driver-registrar` containers start. The driver's
+startup probe may likewise fail with `connection refused` until its CSI socket
+exists. Neither is a problem on a pod that goes on to reach Ready.
 
-```sh
-# Test the readiness probe script directly
-kubectl exec -n kube-system <pod-name> -c azurelustre -- /app/readinessProbe.sh
-```
-
-Expected output when working correctly:
-
-- `"Node pod detected - performing Lustre-specific readiness checks"`
-- `"All Lustre readiness checks passed"`
-
-```sh
-# Check for enhanced validation messages
-kubectl logs -n kube-system -l app=csi-azurelustre-node -c azurelustre --tail=20
-```
-
-Look for CSI driver startup and readiness messages:
-
-- `"vendor_version":"v0.4.0-readiness-http"` - Confirms feature branch deployment
-- Standard CSI GRPC operation logs indicating successful driver initialization
+#### Run the LNet readiness probe directly (loader sidecar)
 
 ```sh
-# Check for detailed validation failure reasons
-kubectl logs -n kube-system <pod-name> -c azurelustre | grep -E "(LNet validation failed|Failed to|not operational)"
+kubectl exec -n kube-system <pod-name> -c lustre-loader -- /app/readinessProbe.sh
 ```
 
-Common issues and solutions:
+Exit code 0 prints `LNet readiness checks passed`. On failure (exit code 1) the
+script prints the specific reason — use it to decide where to look next:
 
-- **"No valid NIDs"**: LNet networking not properly configured
-- **"Self-ping test failed"**: Network connectivity issues
-- **"Interfaces not operational"**: Network interfaces not in UP state
-- **"Lustre module not loaded"**: Kernel module loading issues
+| Probe message | Meaning | Where to look next |
+| ------------- | ------- | ------------------ |
+| `LNet not available or not configured` | `lnetctl net show` failed; LNet is not up | loader logs and kernel-module load (below) |
+| `No LNet NIDs configured` | LNet is up but has no NID | LNet tcp net / interface configuration |
+| `LNet ping functionality not available` | `lnetctl ping` is missing | userspace tooling in the loader image |
+| `Unable to determine LNet NID for self-ping test` | only a loopback NID is present | tcp interface not added to LNet |
+| `LNet self-ping test failed for NID: <nid>` | NID present but not pingable | node networking / LNet |
+| `No LNet interfaces in 'up' state` | the LNet interface is down | node networking |
 
-**Test readiness probe directly:**
+#### Loader sidecar logs
 
 ```sh
-# Test the exec-based readiness probe script
-kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- /app/readinessProbe.sh
+kubectl logs -n kube-system -l app=csi-azurelustre-node -c lustre-loader --tail=50
 ```
 
-Expected responses:
+Look for:
 
-- Exit code 0: Enhanced LNet validation passed
-- Exit code 1: One or more validation checks failed (with descriptive error message)
+- `Loading the LNet.` — modules being loaded on a fresh pod
+- `LNet is loaded skip the load` — modules already resident (e.g. after a sidecar restart)
+- `Running Lustre kernel module version <v> matches the installed client.` — the loaded modules are the version this pod installed
+- `WARNING: the Lustre client upgrade did not take effect on this node` — the resident modules are an older version and could not be replaced; see [Teardown behavior](#teardown-behavior-sigterm-and-termination)
+- `Loader ready; entering LNet reconcile loop` — startup complete
+- `LNet tcp network missing interfaces; reconfiguring.` / `Adding interface: eth0` — the reconcile loop repairing config drift
+- `LNet reconciliation did not complete this cycle` — a reconcile pass failed; the loop retries, but repeated occurrences mean LNet cannot be repaired in place
+- `WARNING: Lustre kernel modules could not be unloaded and remain loaded on this node` — logged by a *terminating* pod; see [Teardown behavior](#teardown-behavior-sigterm-and-termination)
+- `Error: Could not install necessary Lustre packages` followed by `Note: the package manager cannot distinguish…` — the install failed; the note explains why "package not found" is ambiguous
 
-**Test HTTP health endpoints (optional manual testing):**
+### Driver container not Ready (socket not serving)
+
+**Symptoms:**
+
+- The `lustre-loader` sidecar is Ready, but the pod still shows less than `4/4`
+- The `azurelustre` container's readiness probe (`test -S /csi/csi.sock`) is failing
+- The `azurelustre` container's `RESTARTS` count is climbing, or it is in `CrashLoopBackOff`
+
+The driver container installs its userspace Lustre tools and only then opens the
+CSI socket, so it is briefly NotReady on startup (longer on Azure Linux 3, where
+the client install is larger). If the install cannot be completed the container
+exits rather than opening the socket, so the kubelet restarts it and the node is
+never advertised as able to serve mounts it would fail.
+
+`Startup probe failed` events alone indicate only that the install has not yet
+completed: the liveness check is suppressed until the startup probe succeeds, so
+the container is not restarted while the install is in progress. An increasing
+`RESTARTS` count indicates the container is being terminated and recreated,
+which means the install is failing or exceeding the startup probe's budget.
 
 ```sh
-# Test enhanced readiness/liveness via HTTP endpoint
-kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- curl -s localhost:29763/healthz
+# Driver startup + install logs; look for "Listening for connections"
+kubectl logs -n kube-system <pod-name> -c azurelustre --tail=100
+
+# Logs from the previous attempt if the container is restarting
+kubectl logs -n kube-system <pod-name> -c azurelustre --previous --tail=100
+
+# Confirm the socket exists (Ready) or not (NotReady)
+kubectl exec -n kube-system <pod-name> -c azurelustre -- test -S /csi/csi.sock && echo serving || echo "not serving"
+
+# Confirm the userspace tools installed (these come from the driver's utils install)
+kubectl exec -n kube-system <pod-name> -c azurelustre -- sh -c 'command -v mount.lustre lnetctl'
 ```
 
-HTTP responses:
+If the install failed, the driver logs show the `tdnf`/`apt-get` error followed
+by `Error: Could not install necessary Lustre packages`. Common causes: the node
+cannot reach the package feed, or the requested Lustre version
+(`LUSTRE_VERSION` / `CLIENT_SHA_SUFFIX`) does not exist for the node kernel.
 
-- `/healthz`: `ok` (HTTP 200) or `not ready` (HTTP 503)
+> [!NOTE]
+> Kernel modules are **not** installed by the driver container — the
+> `lustre-loader` sidecar already loaded them into the shared host kernel. The
+> driver container only installs the kernel-agnostic userspace tools.
 
-**Check enhanced validation logs:**
+### Loader sidecar restarting (`lustre-loader` CrashLoopBackOff / RESTARTS climbing)
+
+**Symptoms:**
+
+- `kubectl get pod` shows the `lustre-loader` init container with a climbing `RESTARTS` count
+
+The loader's `livenessProbe` (`test -d /sys/module/lnet`) restarts the sidecar
+**only** when the `lnet` kernel module is gone — an unrecoverable in-process
+state. The restart reloads the modules. Transient LNet *config* drift does
+**not** restart the sidecar; the reconcile loop repairs it in place.
 
 ```sh
-# Look for detailed LNet validation messages
-kubectl logs -n kube-system <csi-azurelustre-node-pod> -c azurelustre | grep -E "(LNet validation|NIDs|self-ping|interfaces)"
+# Why did it restart?
+kubectl describe -n kube-system pod <pod-name> | grep -A15 lustre-loader
+
+# Is the module actually present?
+kubectl exec -n kube-system <pod-name> -c lustre-loader -- test -d /sys/module/lnet && echo loaded || echo "GONE"
+
+# Loader logs across the restart
+kubectl logs -n kube-system <pod-name> -c lustre-loader --previous --tail=50
 ```
 
-Look for validation success messages:
+If the module keeps disappearing, check for host-level actions unloading Lustre
+modules (e.g. another agent running `lustre_rmmod`, or a node kernel update that
+invalidates the loaded modules).
 
-- `"LNet validation passed: all checks successful"`
-- `"Found NIDs: <network-identifiers>"`
-- `"LNet self-ping to <nid> successful"`
-- `"All LNet interfaces operational"`
+### Manual LNet debugging (loader sidecar)
 
-**Common readiness failure patterns:**
-
-1. **No valid NIDs found:**
-
-   ```text
-   LNet validation failed: no valid NIDs
-   No valid non-loopback LNet NIDs found
-   ```
-
-   **Solution:** Check LNet configuration and network setup
-
-2. **Self-ping test failed:**
-
-   ```text
-   LNet validation failed: self-ping test failed
-   LNet self-ping to <nid> failed
-   ```
-
-   **Solution:** Verify network connectivity and LNet networking
-
-3. **Interfaces not operational:**
-
-   ```text
-   LNet validation failed: interfaces not operational
-   Found non-operational interface: status: down
-   ```
-
-   **Solution:** Check network interface status and configuration
-
-4. **Module loading issues:**
-
-   ```text
-   Lustre module not loaded
-   LNet kernel module is not loaded
-   ```
-
-   **Solution:** Check kernel module installation and loading
-
-**Debug LNet configuration manually:**
+All LNet and kernel-module inspection runs in the **`lustre-loader`** container,
+which is where the modules are loaded and LNet is configured:
 
 ```sh
 # Check kernel modules
-kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lsmod | grep -E "(lnet|lustre)"
+kubectl exec -n kube-system <pod-name> -c lustre-loader -- sh -c 'lsmod | grep -E "lnet|lustre"'
 
-# Check LNet NIDs
-kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lctl list_nids
+# List LNet NIDs
+kubectl exec -n kube-system <pod-name> -c lustre-loader -- lctl list_nids
 
-# Test LNet self-ping
-kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lctl ping <nid>
+# Show the LNet tcp network and interface status
+kubectl exec -n kube-system <pod-name> -c lustre-loader -- lnetctl net show --net tcp
 
-# Check interface status
-kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lnetctl net show --net tcp
+# Self-ping a NID
+kubectl exec -n kube-system <pod-name> -c lustre-loader -- lnetctl ping <nid>
 ```
 
-**Check probe configuration:**
+### Teardown behavior (SIGTERM and termination)
+
+On pod deletion the `lustre-loader` sidecar's main loop traps `SIGTERM` and
+unloads the Lustre kernel modules so no stale modules are left on the host
+(important before a node driver upgrade), then exits within a few seconds rather
+than waiting out the full termination grace period. If the modules cannot be
+unloaded -- most often because a filesystem is still mounted -- the loader logs
+a line beginning with `WARNING:` stating that they remain loaded. (The warning is
+visible via cluster log aggregation; a terminating pod's logs are not retained by
+`kubectl` after deletion.)
+
+The modules stay resident until something unloads them. There are two ways to
+clear them:
+
+1. Reinstall the driver, remove your workloads from the node so the driver can
+   unload the modules cleanly, then upgrade or uninstall again. Wait until the
+   volumes are actually unmounted before restarting the node pod — deleting a
+   workload pod returns before the kubelet has finished unmounting, and the
+   container that performs the unmount is the one you are about to restart.
+   Confirm with `kubectl exec -n kube-system <node-pod> -c azurelustre -- sh -c 'mount | grep -c lustre'`
+   (expect `0`).
+2. Reboot the node.
+
+If the modules were left loaded and the driver is later upgraded to a different
+Lustre client version, the new loader cannot replace them. It logs a `WARNING:`
+on start saying the upgrade did not take effect and naming both versions; mounts
+on that node keep using the old client. The same two options above apply.
+
+A pod deleted *during* the loader's initial package install (before the modules
+are loaded) exits with nothing to unload, but termination may take up to the
+termination grace period (default 30s): the shell only runs its exit handler
+once the in-flight `tdnf`/`apt` install command returns. This affects only the
+brief install window and leaves no state behind (no modules are loaded yet).
 
 ```sh
-# Verify probe settings in deployment
-kubectl describe -n kube-system pod <csi-azurelustre-node-pod> | grep -A 10 -E "(Liveness|Readiness|Startup)"
+# Confirm a freshly recreated pod reloaded modules (i.e. the previous pod
+# unloaded them on teardown): its loader logs "Loading the LNet." rather than
+# "LNet is loaded skip the load".
+kubectl logs -n kube-system <new-pod-name> -c lustre-loader | grep -E "Loading the LNet|skip the load"
 ```
 
-**Monitor readiness probe attempts:**
+### Watch probe events in real time
 
 ```sh
-# Watch probe events in real-time
-kubectl get events --field-selector involvedObject.name=<csi-azurelustre-node-pod> -n kube-system -w | grep -E "(Readiness|Liveness)"
+kubectl get events --field-selector involvedObject.name=<pod-name> -n kube-system -w | grep -E "Readiness|Liveness|Startup"
 ```
 
 ---
@@ -702,7 +757,7 @@ Check for solutions in [Resolving Common Errors](errors.md)
 
 **Verify Azure permissions for the kubelet identity:**
 
-Confirm that the driver has the necessary [Permissions For Kubelet Identity](driver-parameters.md#Permissions%20For%20Kubleet%20Identity).
+Confirm that the driver has the necessary [Permissions For Kubelet Identity](driver-parameters.md#permissions-for-kubelet-identity).
 
 Check for permission errors in the controller logs:
 
@@ -761,7 +816,7 @@ Check for solutions in [Resolving Common Errors](errors.md)
 See [What are availability zones?](https://learn.microsoft.com/en-us/azure/reliability/availability-zones-overview?tabs=azure-cli#regions-that-support-availability-zones)
 for more information about availability zones.
 
-***Find all skus and available zones for a location***
+#### Find all skus and available zones for a location
 
 ```sh
 # Find all sku values and available zones for a location:
@@ -795,7 +850,7 @@ westus      AMLFS-Durable-Premium-250
 westus      AMLFS-Durable-Premium-500
 ```
 
-***Find skus and available zones for all locations***
+#### Find skus and available zones for all locations
 
 ```sh
 # Find available zones for all locations:
@@ -822,7 +877,7 @@ Common SKU-related issues:
 
 Check for solutions in [Resolving Common Errors](errors.md)
 
-Check [Find all skus and available zones for a location](csi-debug.md#Find_all_skus_and_available_zones_for_a_location)
+Check [Find all skus and available zones for a location](#find-all-skus-and-available-zones-for-a-location)
 
 **Verify SKU availability for a location:**
 
@@ -834,7 +889,7 @@ kubectl get storageclass <storageclass-name> -o yaml | grep -E "sku-name|locatio
 kubectl logs -n kube-system -l app=csi-azurelustre-controller -c azurelustre --tail=300 | grep "must be one of"
 ```
 
-Check [Find all skus and available zones for a location](csi-debug.md#Find_all_skus_and_available_zones_for_a_location). If the location is not supported for AMLFS, the output will be empty.
+Check [Find all skus and available zones for a location](#find-all-skus-and-available-zones-for-a-location). If the location is not supported for AMLFS, the output will be empty.
 
 ### Workload Identity (Dynamic Provisioning)
 
@@ -931,27 +986,32 @@ kubectl get po -o wide -n kube-system -l app=csi-azurelustre-node
 ```
 
 ```text
-NAME                           READY   STATUS    RESTARTS   AGE     IP             NODE
-csi-azurelustre-node-9ds7f     3/3     Running   0          7m4s    10.240.0.35    k8s-agentpool-22533604-1
-csi-azurelustre-node-dr4s4     3/3     Running   0          7m4s    10.240.0.4     k8s-agentpool-22533604-0
+NAME                                READY   STATUS    RESTARTS   AGE     IP             NODE
+csi-azurelustre-node-jammy-9ds7f    4/4     Running   0          7m4s    10.240.0.35    k8s-agentpool-22533604-1
+csi-azurelustre-node-jammy-dr4s4    4/4     Running   0          7m4s    10.240.0.4     k8s-agentpool-22533604-0
 ```
+
+> **Note:** Mounts are performed by the `azurelustre` driver container, so mount
+> logs and `mount` output come from `-c azurelustre`. LNet/kernel-module issues
+> live in the `lustre-loader` sidecar — see [Driver Readiness and Health Issues](#driver-readiness-and-health-issues).
 
 **Get CSI driver logs:**
 
 ```sh
-kubectl logs csi-azurelustre-node-9ds7f -c azurelustre -n kube-system > csi-azurelustre-node.log
+kubectl logs csi-azurelustre-node-jammy-9ds7f -c azurelustre -n kube-system > csi-azurelustre-node.log
 ```
 
-> **Note:** To watch logs in real time from multiple `csi-azurelustre-node` DaemonSet pods simultaneously, run:
+> **Note:** To watch driver logs in real time across all node DaemonSet pods
+> (jammy/noble/azurelinux3) simultaneously, use the label selector:
 >
 > ```sh
-> kubectl logs daemonset/csi-azurelustre-node -c azurelustre -n kube-system -f
+> kubectl logs -n kube-system -l app=csi-azurelustre-node -c azurelustre -f --prefix
 > ```
 
 **Check Lustre mounts inside the driver:**
 
 ```sh
-kubectl exec -it csi-azurelustre-node-9ds7f -n kube-system -c azurelustre -- mount | grep lustre
+kubectl exec -it csi-azurelustre-node-jammy-9ds7f -n kube-system -c azurelustre -- mount | grep lustre
 ```
 
 ```text
@@ -1021,7 +1081,7 @@ kubectl logs -n kube-system -l app=csi-azurelustre-node -c azurelustre --tail=10
 2. **Lustre Module Loading Issues**: Check if Lustre kernel modules are properly loaded
 
    ```sh
-   kubectl exec -n kube-system <csi-azurelustre-node-pod> -c azurelustre -- lsmod | grep lustre
+   kubectl exec -n kube-system <csi-azurelustre-node-pod> -c lustre-loader -- lsmod | grep lustre
    ```
 
 3. **Manual Taint Removal** (Emergency only - not recommended for production):
@@ -1082,7 +1142,10 @@ kubectl edit deployment csi-azurelustre-controller -n kube-system
 **Update DaemonSet deployment:**
 
 ```sh
-kubectl edit ds csi-azurelustre-node -n kube-system
+# Node DaemonSets are per-OS-flavor; edit the one for the affected node OS
+kubectl edit ds csi-azurelustre-node-jammy -n kube-system
+kubectl edit ds csi-azurelustre-node-noble -n kube-system
+kubectl edit ds csi-azurelustre-node-azurelinux3 -n kube-system
 ```
 
 ### Verification Commands
@@ -1134,7 +1197,9 @@ az amlfs check-amlfs-subnet  --sku AMLFS-Durable-Premium-40 --storage-capacity 4
 
    ```bash
    kubectl rollout restart -n kube-system deployment/csi-azurelustre-controller
-   kubectl rollout restart -n kube-system daemonset/csi-azurelustre-node
+   kubectl rollout restart -n kube-system daemonset/csi-azurelustre-node-jammy
+   kubectl rollout restart -n kube-system daemonset/csi-azurelustre-node-noble
+   kubectl rollout restart -n kube-system daemonset/csi-azurelustre-node-azurelinux3
    ```
 
 2. **Force PVC Recreation**

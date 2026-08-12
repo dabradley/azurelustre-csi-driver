@@ -45,17 +45,33 @@ helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespa
 helm search repo -l azurelustre-csi-driver
 ```
 
-## Upgrade (example: bump driver image tag only)
+## Upgrade
+
+> [!IMPORTANT]
+> **Stop every workload using Lustre on the affected nodes before upgrading.** An
+> upgrade restarts the node pods. If the release changes the Lustre client
+> version, the new kernel modules can only load once the old ones are unloaded,
+> and the kernel refuses to unload them while any Lustre filesystem is mounted.
+> Drain or scale down every pod holding a Lustre volume first, and **wait until
+> the volumes are actually unmounted before upgrading** -- deleting a pod returns
+> before the kubelet has finished unmounting its volumes, and an upgrade started
+> in that window hits a mount that is still going away.
 
 ```console
-helm upgrade azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system --set image.tag=v0.5.1
+helm upgrade azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system --version 0.5.1
 ```
 
 Or from local chart:
 
 ```console
-helm upgrade azurelustre ./charts/latest/azurelustre-csi-driver --namespace kube-system --set image.tag=v0.5.1
+helm upgrade azurelustre ./charts/latest/azurelustre-csi-driver --namespace kube-system
 ```
+
+If Lustre volumes are still mounted when the new node pods start and the release
+changes the client version, the upgrade does not take effect on those nodes: the
+old client stays resident, mounts keep using the old version, and the
+`lustre-loader` container logs a `WARNING` naming both versions. Stop the
+workloads and restart the node pods to complete the upgrade.
 
 ## Uninstall
 
@@ -66,11 +82,15 @@ helm uninstall azurelustre -n kube-system
 ## Tips
 
 - Dry run rendering: `helm template test ./charts/latest/azurelustre-csi-driver -n kube-system | less`
-- Skip Lustre client install on nodes: `--set node.lustreClient.install=false`
-- Change Lustre client version (per flavor): `--set node.jammy.lustreClient.version=2.15.7 --set node.jammy.lustreClient.shaSuffix=<sha>` (similarly for `node.noble`)
 - Force image pull always: `--set image.pullPolicy=Always`
 
 ## latest chart configuration
+
+> [!WARNING]
+> `image.tag` and `node.<flavor>.lustreClient.*` are exposed for debugging and
+> hotfixes only. Each release is validated with a specific driver image and
+> Lustre client version together, and overriding either on its own breaks that
+> pairing. Do not set them unless Microsoft support directs you to.
 
 Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 
@@ -90,7 +110,6 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | `controller.extraArgs` | Extra args passed to controller driver | `["-v=5"]` |
 | `node.priorityClassName` | Node pod priority class | `system-node-critical` |
 | `node.updateStrategy.maxUnavailable` | Max node pods unavailable during a rolling update | `10%` |
-| `node.lustreClient.install` | Install Lustre client on nodes | `true` |
 | `node.jammy.lustreClient.version` | Lustre client version for jammy flavor | `2.15.8` |
 | `node.jammy.lustreClient.shaSuffix` | Lustre client SHA suffix for jammy flavor | `34-gc0f2040` |
 | `node.noble.lustreClient.version` | Lustre client version for noble flavor | `2.17.0` |
