@@ -15,7 +15,6 @@ sidecars:
       requests:
         cpu: 10m
         memory: 20Mi
-    extraArgs: ["-v=2", "--leader-election", "--timeout=15m", "--extra-create-metadata=true"]
   livenessProbe:
     repository: mcr.microsoft.com/oss/kubernetes-csi/livenessprobe
     tag: v2.15.0

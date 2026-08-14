@@ -97,6 +97,7 @@ spec:
             - --leader-election
             - --timeout=15m
             - --extra-create-metadata=true
+            - --volume-name-uuid-length=-1
             - --csi-address=$(ADDRESS)
           env:
             - name: ADDRESS
