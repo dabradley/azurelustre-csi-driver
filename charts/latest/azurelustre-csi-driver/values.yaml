@@ -41,7 +41,6 @@ sidecars:
       requests:
         cpu: 10m
         memory: 20Mi
-    extraArgs: ["--v=2"]
 
 controller:
   replicas: 2
