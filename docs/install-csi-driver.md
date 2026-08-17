@@ -275,6 +275,17 @@ The startup taint functionality is enabled by default but can be configured duri
 
 For most AKS users, the default behavior provides optimal pod scheduling and should not be changed
 
+## Node pool taints and tolerations
+
+The node DaemonSets and the controller carry a deliberate, minimal set of tolerations so the driver lands where Lustre workloads run and stays off AKS-managed reserved capacity:
+
+- **The node plugin does *not* tolerate the `CriticalAddonsOnly` taint.** This is the AKS-recommended way to keep a DaemonSet off system node pools (see [Manage system node pools](https://learn.microsoft.com/azure/aks/use-system-pools)). It also keeps the plugin off **AKS Automatic** system nodes, which are tainted `CriticalAddonsOnly`. On a cluster whose only pool is an *untainted* system pool, the plugin still runs there so Lustre volumes can mount.
+- **The node plugin tolerates the common AKS user-pool taints by default** — spot (`kubernetes.azure.com/scalesetpriority=spot:NoSchedule`) and GPU (`sku=gpu:NoSchedule` and `nvidia.com/gpu:NoSchedule`) — so it runs on the pre-emptible/accelerated pools where Lustre HPC/AI workloads typically schedule.
+- **The controller** tolerates only control-plane taints. It intentionally does not chase spot/GPU nodes and relies on an untainted node being available (AKS Standard keeps an untainted system pool by default; on AKS Automatic, node auto-provisioning creates an untainted node for the pending controller).
+
+> [!IMPORTANT]
+> If you run Lustre workloads on a **custom-tainted** user node pool (any taint other than the spot/GPU taints above), the node plugin will **not** schedule there and pods on that pool fail to mount Lustre volumes with no obvious driver error — the same silent-failure signature as an unsupported `os-sku-effective` node above. Add a matching toleration via the Helm value `node.tolerations` (which **replaces** the default set, so include the spot/GPU entries you still need). For the static `deploy/*.yaml` manifests, edit the `tolerations` block in each `csi-azurelustre-node-*.yaml`.
+
 ## Custom Entrypoint (Advanced)
 
 The CSI driver supports overriding the built-in entrypoint script via a Kubernetes ConfigMap. This is intended as a **troubleshooting/debugging feature** for use when suggested by Microsoft support, or for customers with custom initialization requirements (e.g., non-standard networking setups).
