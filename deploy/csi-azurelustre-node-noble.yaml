@@ -53,8 +53,21 @@ spec:
                     values:
                       - Ubuntu2404
       priorityClassName: system-node-critical
+      # Tolerate common AKS user-pool taints (spot, GPU) but NOT CriticalAddonsOnly,
+      # which keeps the plugin off reserved/AKS Automatic system pools. See the
+      # node.tolerations comment in the Helm chart values.yaml for rationale.
       tolerations:
-        - operator: Exists
+        - key: kubernetes.azure.com/scalesetpriority
+          operator: Equal
+          value: spot
+          effect: NoSchedule
+        - key: sku
+          operator: Equal
+          value: gpu
+          effect: NoSchedule
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
       initContainers:
         # Native sidecar (restartPolicy: Always): installs the Lustre client
         # kernel module for the running kernel, loads it into the shared host

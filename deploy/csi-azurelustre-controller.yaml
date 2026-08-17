@@ -41,8 +41,6 @@ spec:
         - key: node-role.kubernetes.io/control-plane
           operator: Exists
           effect: NoSchedule
-        - key: CriticalAddonsOnly
-          operator: Exists
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -58,12 +56,15 @@ spec:
                     operator: In
                     values:
                       - linux
+          # Soft preference to keep the controller off AKS-managed system node
+          # pools; advisory only, so it still falls back to a system node when
+          # no user node is available.
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
               preference:
                 matchExpressions:
                   - key: kubernetes.azure.com/mode
-                    operator: In
+                    operator: NotIn
                     values:
                       - system
         podAntiAffinity:

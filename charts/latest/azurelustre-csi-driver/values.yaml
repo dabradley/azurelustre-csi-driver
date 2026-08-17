@@ -53,6 +53,15 @@ controller:
       memory: 20Mi
   nodeSelector:
     kubernetes.io/os: linux
+  # The controller does no host/kernel work, so it only tolerates control-plane
+  # taints. It intentionally does NOT carry the node plugin's user-pool (spot/GPU)
+  # tolerations: it should land on stable, general-purpose capacity rather than
+  # chase pre-emptible/accelerated nodes. On AKS it relies on an untainted node
+  # being available (AKS Standard keeps an untainted system pool by default; on
+  # AKS Automatic, node auto-provisioning creates an untainted user node for the
+  # pending controller). The CriticalAddonsOnly toleration is deliberately omitted
+  # so the controller is not admitted onto AKS-managed reserved system nodes and
+  # stays compliant with the aks-managed-critical-addons-only admission policy.
   tolerations:
     - key: "node-role.kubernetes.io/master"
       operator: "Exists"
@@ -63,14 +72,34 @@ controller:
     - key: "node-role.kubernetes.io/control-plane"
       operator: "Exists"
       effect: "NoSchedule"
-    - key: "CriticalAddonsOnly"
-      operator: "Exists"
   priorityClassName: system-cluster-critical
   extraArgs: ["-v=5"]
 
 node:
+  # The node plugin is deliberately kept off AKS-managed *reserved* system node
+  # pools by NOT tolerating the CriticalAddonsOnly taint (the AKS-recommended way
+  # to keep a DaemonSet off system pools; see aka.ms/aks/use-system-pools). This
+  # also keeps it off AKS Automatic system nodes, which are tainted
+  # CriticalAddonsOnly. On an untainted single system-pool cluster the plugin
+  # still runs, so Lustre volumes can mount there.
+  #
+  # A blanket `{operator: Exists}` toleration is intentionally avoided: it is
+  # rejected on AKS Automatic by the aks-managed-critical-addons-only admission
+  # policy. Instead we tolerate the common AKS user-pool taints (spot and GPU) so
+  # the plugin runs where Lustre HPC/AI workloads schedule. Customers with other
+  # custom user-pool taints should add matching tolerations here.
   tolerations:
-    - operator: "Exists"
+    - key: "kubernetes.azure.com/scalesetpriority"
+      operator: "Equal"
+      value: "spot"
+      effect: "NoSchedule"
+    - key: "sku"
+      operator: "Equal"
+      value: "gpu"
+      effect: "NoSchedule"
+    - key: "nvidia.com/gpu"
+      operator: "Exists"
+      effect: "NoSchedule"
   updateStrategy:
     maxUnavailable: 10%
   priorityClassName: system-node-critical

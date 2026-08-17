@@ -58,12 +58,16 @@ spec:
                     operator: In
                     values:
                       - linux
+          # Soft preference to keep the controller off AKS-managed system node
+          # pools. This is advisory only (a Deployment, unlike a DaemonSet,
+          # schedules replicas the scheduler can steer) so the controller still
+          # falls back to a system node if no user node is available.
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
               preference:
                 matchExpressions:
                   - key: kubernetes.azure.com/mode
-                    operator: In
+                    operator: NotIn
                     values:
                       - system
         podAntiAffinity:
