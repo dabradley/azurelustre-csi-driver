@@ -93,9 +93,11 @@ spec:
         - name: csi-provisioner
           image: {{ .Values.sidecars.provisioner.repository }}:{{ .Values.sidecars.provisioner.tag }}
           args:
-{{- range $arg := .Values.sidecars.provisioner.extraArgs }}
-            - {{ $arg | quote }}
-{{- end }}
+            - -v=2
+            - --leader-election
+            - --timeout=15m
+            - --extra-create-metadata=true
+            - --volume-name-uuid-length=-1
             - --csi-address=$(ADDRESS)
           env:
             - name: ADDRESS

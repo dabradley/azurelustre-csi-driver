@@ -92,6 +92,11 @@ helm uninstall azurelustre -n kube-system
 > Lustre client version together, and overriding either on its own breaks that
 > pairing. Do not set them unless Microsoft support directs you to.
 
+The chart manages the `csi-provisioner` arguments as part of the supported
+driver configuration. In particular, it preserves the complete PVC UID in
+dynamically provisioned volume names by setting
+`--volume-name-uuid-length=-1`.
+
 Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 
 | Parameter | Description | Default |
