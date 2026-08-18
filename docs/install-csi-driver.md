@@ -12,7 +12,7 @@ Helm is the recommended installation method for production clusters.
 helm repo add azurelustre-csi-driver https://raw.githubusercontent.com/kubernetes-sigs/azurelustre-csi-driver/main/charts
 helm repo update
 helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver \
-  --namespace kube-system --create-namespace --version 0.5.0
+  --namespace kube-system --create-namespace --version 0.99.0
 ```
 
 To upgrade:
@@ -45,7 +45,7 @@ helm uninstall azurelustre -n kube-system
 > ```shell
 > ./deploy/uninstall-driver.sh
 > helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver \
->   --namespace kube-system --create-namespace --version 0.5.0
+>   --namespace kube-system --create-namespace --version 0.99.0
 > ```
 
 For the full list of configurable values, version history, and advanced Helm usage, see the [Helm chart README](../charts/README.md).

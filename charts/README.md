@@ -11,10 +11,10 @@ helm repo update
 
 ## Install latest released chart
 
-Installs released version (e.g. `0.5.0`):
+Installs released version (e.g. `0.99.0`):
 
 ```console
-helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system --create-namespace --version 0.5.0
+helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system --create-namespace --version 0.99.0
 ```
 
 ## Install snapshot (latest development)
@@ -36,7 +36,7 @@ helm install azurelustre ./charts/latest/azurelustre-csi-driver --namespace kube
 ## Install a specific version (after repo add)
 
 ```console
-helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system --version 0.5.0
+helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system --version 0.99.0
 ```
 
 ## Search for all available versions
@@ -102,7 +102,7 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | Parameter | Description | Default |
 | --- | --- | --- |
 | `image.repository` | Driver image repository | `mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi` |
-| `image.tag` | Driver image tag | `v0.5.0` (released) <br> `latest` (snapshot) |
+| `image.tag` | Driver image tag | `v0.99.0` (released) <br> `latest` (snapshot) |
 | `image.pullPolicy` | Driver image pull policy | `Always` |
 | `sidecars.provisioner.repository` | csi-provisioner sidecar image | `mcr.microsoft.com/oss/kubernetes-csi/csi-provisioner` |
 | `sidecars.provisioner.tag` | csi-provisioner image tag | `v5.2.0` |

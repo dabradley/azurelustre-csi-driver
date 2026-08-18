@@ -1,41 +1,43 @@
----
-kind: DaemonSet
 apiVersion: apps/v1
+kind: DaemonSet
 metadata:
-  name: csi-azurelustre-node-noble
-  namespace: kube-system
+  name: {{ include "azurelustre.fullname" . }}-node-azurelinux3
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/component: node
-    app.kubernetes.io/name: azurelustre-csi-driver
-    app.kubernetes.io/part-of: azurelustre-csi-driver
-    app.kubernetes.io/version: v0.99.0
     app: csi-azurelustre-node
-    flavor: noble
+    flavor: azurelinux3
+    {{- include "azurelustre.labels" . | nindent 4 }}
 spec:
   updateStrategy:
     rollingUpdate:
-      maxUnavailable: 10%
+      maxUnavailable: {{ .Values.node.updateStrategy.maxUnavailable }}
     type: RollingUpdate
   selector:
     matchLabels:
-      app: csi-azurelustre-node
       app.kubernetes.io/component: node
-      flavor: noble
+      app: csi-azurelustre-node
+      flavor: azurelinux3
   template:
     metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
         app.kubernetes.io/component: node
-        app.kubernetes.io/name: azurelustre-csi-driver
-        app.kubernetes.io/part-of: azurelustre-csi-driver
-        app.kubernetes.io/version: v0.99.0
         app: csi-azurelustre-node
-        flavor: noble
+        flavor: azurelinux3
+        {{- include "azurelustre.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       hostNetwork: true
       dnsPolicy: Default
-      serviceAccountName: csi-azurelustre-node-sa
+      serviceAccountName: {{ include "azurelustre.serviceAccountNameNode" . }}
       nodeSelector:
-        kubernetes.io/os: linux
+        {{- toYaml .Values.node.azurelinux3.nodeSelector | nindent 8 }}
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -51,22 +53,14 @@ spec:
                   - key: kubernetes.azure.com/os-sku-effective
                     operator: In
                     values:
-                      - Ubuntu2404
-      priorityClassName: system-node-critical
+                      {{- toYaml .Values.node.azurelinux3.affinityOsSkus | nindent 22 }}
+      priorityClassName: {{ .Values.node.priorityClassName }}
       tolerations:
-        - operator: Exists
+        {{- toYaml .Values.node.tolerations | nindent 8 }}
       initContainers:
-        # Native sidecar (restartPolicy: Always): installs the Lustre client
-        # kernel module for the running kernel, loads it into the shared host
-        # kernel, configures LNet, then runs an LNet reconcile loop for the life
-        # of the pod. Its startupProbe gates the driver and registrar containers
-        # so they do not start until LNet is up, leaving the registrar's 30s
-        # connect deadline racing only the driver's utils install; on
-        # termination its SIGTERM handler unloads the modules so nothing is left
-        # behind when the driver is uninstalled.
         - name: lustre-loader
-          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.99.0-noble
-          imagePullPolicy: Always
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}-azurelinux3
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           restartPolicy: Always
           securityContext:
             privileged: true
@@ -90,10 +84,6 @@ spec:
             failureThreshold: 5
             exec:
               command:
-                # Restart the sidecar only when the Lustre kernel module has
-                # vanished (unrecoverable in-process). Transient LNet config
-                # drift is repaired by the reconcile loop and surfaced via the
-                # readinessProbe, so it must not trigger a restart here.
                 - /bin/sh
                 - -c
                 - "test -d /sys/module/lnet"
@@ -104,11 +94,11 @@ spec:
             - name: AZURELUSTRE_CSI_ROLE
               value: loader
             - name: LUSTRE_VERSION
-              value: "2.17.0"
+              value: {{ .Values.node.azurelinux3.lustreClient.version | quote }}
             - name: CLIENT_SHA_SUFFIX
-              value: "24-gf517bc4"
+              value: {{ .Values.node.azurelinux3.lustreClient.shaSuffix | quote }}
           volumeMounts:
-            - mountPath: /dev
+            - mountPath: {{ .Values.paths.dev }}
               name: host-dev
             - mountPath: /etc/host-os-release
               name: host-os-release
@@ -116,37 +106,27 @@ spec:
               name: custom-entrypoint
               readOnly: true
           resources:
-            limits:
-              cpu: 1
-              memory: 200Mi
-            requests:
-              cpu: 10m
-              memory: 20Mi
+            {{- toYaml .Values.node.azurelinux3.resources | nindent 12 }}
       containers:
         - name: liveness-probe
-          volumeMounts:
-            - mountPath: /csi
-              name: socket-dir
-          image: mcr.microsoft.com/oss/kubernetes-csi/livenessprobe:v2.15.0
+          image: {{ .Values.sidecars.livenessProbe.repository }}:{{ .Values.sidecars.livenessProbe.tag }}
           args:
             - --csi-address=/csi/csi.sock
             - --probe-timeout=120s
-            - --health-port=29763
+            - --health-port={{ .Values.sidecars.livenessProbe.node.healthPort }}
             - --v=2
+          volumeMounts:
+            - mountPath: /csi
+              name: socket-dir
           resources:
-            limits:
-              cpu: 100m
-              memory: 100Mi
-            requests:
-              cpu: 10m
-              memory: 20Mi
+            {{- toYaml .Values.sidecars.livenessProbe.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop:
                 - ALL
         - name: node-driver-registrar
-          image: mcr.microsoft.com/oss/kubernetes-csi/csi-node-driver-registrar:v2.13.0
+          image: {{ .Values.sidecars.nodeDriverRegistrar.repository }}:{{ .Values.sidecars.nodeDriverRegistrar.tag }}
           args:
             - --csi-address=$(ADDRESS)
             - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
@@ -163,44 +143,33 @@ spec:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins/azurelustre.csi.azure.com/csi.sock
+              value: {{ .Values.paths.kubelet }}/plugins/{{ .Values.csidriver.name }}/csi.sock
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
             - name: registration-dir
               mountPath: /registration
           resources:
-            limits:
-              cpu: 100m
-              memory: 100Mi
-            requests:
-              cpu: 10m
-              memory: 20Mi
+            {{- toYaml .Values.sidecars.nodeDriverRegistrar.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop:
                 - ALL
         - name: azurelustre
-          image: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi:v0.99.0-noble
-          imagePullPolicy: Always
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}-azurelinux3
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
-            - -v=5
+{{- range $arg := .Values.node.extraArgs }}
+            - {{ $arg | quote }}
+{{- end }}
             - --endpoint=$(CSI_ENDPOINT)
             - --nodeid=$(KUBE_NODE_NAME)
           ports:
-            - containerPort: 29763
+            - containerPort: {{ .Values.sidecars.livenessProbe.node.healthPort }}
               name: healthz
               protocol: TCP
-          # Reserved port for metrics
-          # - containerPort: 29765
-          #   name: metrics
-          #   protocol: TCP
           startupProbe:
-            # Hold off the livenessProbe until the driver is serving: the
-            # liveness-probe sidecar does not bind :29763 until it has connected
-            # to csi.sock, so /healthz is connection-refused for the whole utils
-            # install.
             failureThreshold: 60
             httpGet:
               path: /healthz
@@ -217,11 +186,6 @@ spec:
             timeoutSeconds: 10
             periodSeconds: 30
           readinessProbe:
-            # Gate Ready on the CSI socket existing: the driver installs its
-            # userspace utils and only then execs and opens the socket (~18s on
-            # Azure Linux), so without this the pod reports Ready before it can
-            # serve mounts, letting a rolling upgrade advance past a node whose
-            # driver is not serving yet.
             exec:
               command:
                 - /bin/sh
@@ -237,9 +201,9 @@ spec:
             - name: AZURELUSTRE_CSI_ROLE
               value: driver
             - name: LUSTRE_VERSION
-              value: "2.17.0"
+              value: {{ .Values.node.azurelinux3.lustreClient.version | quote }}
             - name: CLIENT_SHA_SUFFIX
-              value: "24-gf517bc4"
+              value: {{ .Values.node.azurelinux3.lustreClient.shaSuffix | quote }}
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -250,12 +214,12 @@ spec:
           volumeMounts:
             - mountPath: /csi
               name: socket-dir
-            - mountPath: /var/lib/kubelet/
+            - mountPath: {{ .Values.paths.kubelet }}/
               name: mountpoint-dir
               mountPropagation: Bidirectional
-            - mountPath: /etc/kubernetes/
+            - mountPath: {{ .Values.paths.kubernetes }}/
               name: azure-cred
-            - mountPath: /dev
+            - mountPath: {{ .Values.paths.dev }}
               name: host-dev
             - mountPath: /etc/host-os-release
               name: host-os-release
@@ -263,35 +227,30 @@ spec:
               name: custom-entrypoint
               readOnly: true
           resources:
-            limits:
-              cpu: 1
-              memory: 200Mi
-            requests:
-              cpu: 10m
-              memory: 20Mi
+            {{- toYaml .Values.node.azurelinux3.resources | nindent 12 }}
       volumes:
         - hostPath:
-            path: /var/lib/kubelet/plugins/azurelustre.csi.azure.com
+            path: {{ .Values.paths.kubelet }}/plugins/{{ .Values.csidriver.name }}
             type: DirectoryOrCreate
           name: socket-dir
         - hostPath:
-            path: /var/lib/kubelet/plugins_registry/
+            path: {{ .Values.paths.kubelet }}/plugins_registry/
             type: Directory
           name: registration-dir
         - hostPath:
-            path: /var/lib/kubelet/
+            path: {{ .Values.paths.kubelet }}/
             type: Directory
           name: mountpoint-dir
         - hostPath:
-            path: /etc/kubernetes/
+            path: {{ .Values.paths.kubernetes }}/
             type: DirectoryOrCreate
           name: azure-cred
         - hostPath:
-            path: /dev
+            path: {{ .Values.paths.dev }}
             type: Directory
           name: host-dev
         - hostPath:
-            path: /etc/os-release
+            path: {{ .Values.paths.osRelease }}
             type: File
           name: host-os-release
         - name: custom-entrypoint
