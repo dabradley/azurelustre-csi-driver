@@ -1,0 +1,155 @@
+# Default values for azurelustre-csi-driver (latest).
+image:
+  repository: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi
+  tag: latest
+  pullPolicy: Always
+sidecars:
+  provisioner:
+    repository: mcr.microsoft.com/oss/kubernetes-csi/csi-provisioner
+    tag: v5.2.0
+    resources:
+      limits:
+        cpu: 100m
+        memory: 300Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+  livenessProbe:
+    repository: mcr.microsoft.com/oss/kubernetes-csi/livenessprobe
+    tag: v2.15.0
+    resources:
+      limits:
+        cpu: 100m
+        memory: 100Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+    controller:
+      healthPort: 29762
+    node:
+      # All node DaemonSet flavors share this port. This is safe because
+      # nodeAffinity ensures each flavor runs on distinct nodes.
+      healthPort: 29763
+  nodeDriverRegistrar:
+    repository: mcr.microsoft.com/oss/kubernetes-csi/csi-node-driver-registrar
+    tag: v2.13.0
+    resources:
+      limits:
+        cpu: 100m
+        memory: 100Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+controller:
+  replicas: 3
+  resources:
+    limits:
+      cpu: 1
+      memory: 200Mi
+    requests:
+      cpu: 10m
+      memory: 20Mi
+  nodeSelector:
+    kubernetes.io/os: linux
+  tolerations:
+    - key: "node-role.kubernetes.io/master"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "node-role.kubernetes.io/controlplane"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "CriticalAddonsOnly"
+      operator: "Exists"
+  priorityClassName: system-cluster-critical
+  extraArgs: ["-v=5"]
+node:
+  tolerations:
+    - operator: "Exists"
+  updateStrategy:
+    maxUnavailable: 10%
+  priorityClassName: system-node-critical
+  extraArgs: ["-v=5"]
+  jammy:
+    affinityOsSkus:
+      - Ubuntu2204
+      - Ubuntu2004
+    nodeSelector:
+      kubernetes.io/os: linux
+      kubernetes.io/arch: amd64
+    resources:
+      limits:
+        cpu: 1
+        memory: 200Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+    lustreClient:
+      version: 2.15.8
+      shaSuffix: 34-gc0f2040
+  noble:
+    affinityOsSkus:
+      - Ubuntu2404
+    nodeSelector:
+      kubernetes.io/os: linux
+    resources:
+      limits:
+        cpu: 1
+        memory: 200Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+    lustreClient:
+      version: 2.17.0
+      shaSuffix: 24-gf517bc4
+  azurelinux3:
+    affinityOsSkus:
+      - AzureLinux3
+    nodeSelector:
+      kubernetes.io/os: linux
+      kubernetes.io/arch: amd64
+    resources:
+      limits:
+        cpu: 1
+        memory: 500Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+    lustreClient:
+      version: 2.17.0
+      shaSuffix: 24-gf517bc4
+rbac:
+  create: true
+csidriver:
+  name: azurelustre.csi.azure.com
+  fsGroupPolicy: File
+  attachRequired: false
+  podInfoOnMount: true
+# Microsoft Entra Workload Identity.
+#
+# For direct Helm installs, set IsWorkloadIdentityEnabled to "Enabled" and
+# IdentityClientId to the client ID of a user-assigned managed identity that has
+# a federated credential for the controller service account. IdentityTenantId is
+# optional for cross-tenant scenarios. These value names also match the AKS
+# extension workload identity contract so the chart remains compatible with
+# platform-managed value injection.
+#
+# Workload identity is only used for dynamic provisioning (ARM calls to create
+# and delete AMLFS filesystems). When IsWorkloadIdentityEnabled is "Disabled",
+# no workload identity label or annotation is rendered. IdentityClientId is
+# required when IsWorkloadIdentityEnabled is "Enabled".
+IsWorkloadIdentityEnabled: "Disabled"
+IdentityClientId: ""
+IdentityTenantId: ""
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+podAnnotations: {}
+podLabels: {}
+paths:
+  kubelet: /var/lib/kubelet
+  kubernetes: /etc/kubernetes
+  dev: /dev
+  osRelease: /etc/os-release
