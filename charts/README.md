@@ -112,8 +112,10 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | `sidecars.nodeDriverRegistrar.tag` | node-driver-registrar image tag | `v2.13.0` |
 | `controller.replicas` | Controller replicas | `2` |
 | `controller.priorityClassName` | Controller pod priority class | `system-cluster-critical` |
+| `controller.tolerations` | Controller pod tolerations (control-plane taints only; does not tolerate `CriticalAddonsOnly`) | control-plane `master`/`controlplane`/`control-plane` |
 | `controller.extraArgs` | Extra args passed to controller driver | `["-v=5"]` |
 | `node.priorityClassName` | Node pod priority class | `system-node-critical` |
+| `node.tolerations` | Node DaemonSet tolerations. Tolerates common AKS user-pool taints (spot, GPU) but **not** `CriticalAddonsOnly`, so the plugin stays off reserved/tainted system pools. Overriding **replaces** this set — for custom-tainted Lustre pools, include the spot/GPU entries you still need. | spot + `sku=gpu` + `nvidia.com/gpu` |
 | `node.updateStrategy.maxUnavailable` | Max node pods unavailable during a rolling update | `10%` |
 | `node.jammy.lustreClient.version` | Lustre client version for jammy flavor | `2.15.8` |
 | `node.jammy.lustreClient.shaSuffix` | Lustre client SHA suffix for jammy flavor | `34-gc0f2040` |
