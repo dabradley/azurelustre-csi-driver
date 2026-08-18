@@ -110,7 +110,7 @@ Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
 | `sidecars.livenessProbe.tag` | liveness probe image tag | `v2.15.0` |
 | `sidecars.nodeDriverRegistrar.repository` | node-driver-registrar image | `mcr.microsoft.com/oss/kubernetes-csi/csi-node-driver-registrar` |
 | `sidecars.nodeDriverRegistrar.tag` | node-driver-registrar image tag | `v2.13.0` |
-| `controller.replicas` | Controller replicas | `2` |
+| `controller.replicas` | Controller replicas | `3` |
 | `controller.priorityClassName` | Controller pod priority class | `system-cluster-critical` |
 | `controller.extraArgs` | Extra args passed to controller driver | `["-v=5"]` |
 | `node.priorityClassName` | Node pod priority class | `system-node-critical` |

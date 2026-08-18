@@ -11,7 +11,7 @@ metadata:
     app.kubernetes.io/version: latest
     app: csi-azurelustre-controller
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
       app: csi-azurelustre-controller
@@ -29,7 +29,7 @@ spec:
     spec:
       serviceAccountName: csi-azurelustre-controller-sa
       nodeSelector:
-        kubernetes.io/os: linux  # add "kubernetes.io/role: master" to run controller on master node
+        kubernetes.io/os: linux # add "kubernetes.io/role: master" to run controller on master node
       priorityClassName: system-cluster-critical
       tolerations:
         - key: node-role.kubernetes.io/master

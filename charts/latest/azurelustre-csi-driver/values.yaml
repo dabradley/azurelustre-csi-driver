@@ -3,7 +3,6 @@ image:
   repository: mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi
   tag: latest
   pullPolicy: Always
-
 sidecars:
   provisioner:
     repository: mcr.microsoft.com/oss/kubernetes-csi/csi-provisioner
@@ -41,9 +40,8 @@ sidecars:
       requests:
         cpu: 10m
         memory: 20Mi
-
 controller:
-  replicas: 2
+  replicas: 3
   resources:
     limits:
       cpu: 1
@@ -67,7 +65,6 @@ controller:
       operator: "Exists"
   priorityClassName: system-cluster-critical
   extraArgs: ["-v=5"]
-
 node:
   tolerations:
     - operator: "Exists"
@@ -123,16 +120,13 @@ node:
     lustreClient:
       version: 2.17.0
       shaSuffix: 24-gf517bc4
-
 rbac:
   create: true
-
 csidriver:
   name: azurelustre.csi.azure.com
   fsGroupPolicy: File
   attachRequired: false
   podInfoOnMount: true
-
 # Microsoft Entra Workload Identity.
 #
 # For direct Helm installs, set IsWorkloadIdentityEnabled to "Enabled" and
@@ -149,7 +143,6 @@ csidriver:
 IsWorkloadIdentityEnabled: "Disabled"
 IdentityClientId: ""
 IdentityTenantId: ""
-
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
