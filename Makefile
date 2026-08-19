@@ -115,10 +115,6 @@ e2e-test:
 		go test -v -timeout=0 ./test/e2e ${GINKGO_FLAGS};\
 	fi
 
-.PHONY: helm-chart-packages
-helm-chart-packages:
-	hack/update-helm-chart-packages.sh
-#
 # Azure Lustre: Code build
 #
 .PHONY: quicklustre
