@@ -1,49 +1,41 @@
 # Install Azure Lustre CSI Driver with Helm 3
 
-## Add Helm Repo
+## Released chart versions
 
-To add the Helm repo:
+| Chart version | Driver image family |
+| --- | --- |
 
-```console
-helm repo add azurelustre-csi-driver https://raw.githubusercontent.com/kubernetes-sigs/azurelustre-csi-driver/main/charts
-helm repo update
-```
+Install only versions listed above. To see every chart tag currently published to the
+registry — including pre-release and customer-hidden preview tags that are **not**
+supported for general install — list them directly:
 
-## Install latest released chart
+    curl -s https://mcr.microsoft.com/v2/microsoft.azuremanagedlustre/azurelustre-csi-driver/tags/list | jq -r '.tags[]'
 
-Installs released version (e.g. `0.5.0`):
+## Install a released chart
 
-```console
-helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system --create-namespace --version 0.5.0
-```
+Released charts are OCI artifacts in MCR. Set `CHART_VERSION` to the exact Helm
+chart version (`A.B.C`) listed under [Released chart versions](#released-chart-versions).
+The chart version is also its immutable OCI tag. The table maps it to the
+independent driver image family selected by `image.tag`; `appVersion` reports
+that driver release as informational metadata.
+
+    CHART_VERSION=A.B.C
+    helm install azurelustre \
+      oci://mcr.microsoft.com/microsoft.azuremanagedlustre/azurelustre-csi-driver \
+      --namespace kube-system --create-namespace \
+      --version "${CHART_VERSION}"
 
 ## Install snapshot (latest development)
 
 Use the in-repo `latest` chart (unreleased development branch content):
 
-```console
-helm install azurelustre ./charts/latest/azurelustre-csi-driver --namespace kube-system --create-namespace
-```
+    helm install azurelustre ./charts/latest/azurelustre-csi-driver --namespace kube-system --create-namespace
 
-Not for production. Image defaults to `latest` tag, which is not a publicly released tag.
+The chart uses the unreleased `latest` image by default.
 
 ## Install from working copy
 
-```console
-helm install azurelustre ./charts/latest/azurelustre-csi-driver --namespace kube-system
-```
-
-## Install a specific version (after repo add)
-
-```console
-helm install azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system --version 0.5.0
-```
-
-## Search for all available versions
-
-```console
-helm search repo -l azurelustre-csi-driver
-```
+    helm install azurelustre ./charts/latest/azurelustre-csi-driver --namespace kube-system
 
 ## Upgrade
 
@@ -57,15 +49,15 @@ helm search repo -l azurelustre-csi-driver
 > before the kubelet has finished unmounting its volumes, and an upgrade started
 > in that window hits a mount that is still going away.
 
-```console
-helm upgrade azurelustre azurelustre-csi-driver/azurelustre-csi-driver --namespace kube-system --version 0.5.1
-```
+    CHART_VERSION=A.B.C
+    helm upgrade azurelustre \
+      oci://mcr.microsoft.com/microsoft.azuremanagedlustre/azurelustre-csi-driver \
+      --namespace kube-system \
+      --version "${CHART_VERSION}"
 
 Or from local chart:
 
-```console
-helm upgrade azurelustre ./charts/latest/azurelustre-csi-driver --namespace kube-system
-```
+    helm upgrade azurelustre ./charts/latest/azurelustre-csi-driver --namespace kube-system
 
 If Lustre volumes are still mounted when the new node pods start and the release
 changes the client version, the upgrade does not take effect on those nodes: the
@@ -75,34 +67,34 @@ workloads and restart the node pods to complete the upgrade.
 
 ## Uninstall
 
-```console
-helm uninstall azurelustre -n kube-system
-```
+    helm uninstall azurelustre -n kube-system
 
 ## Tips
 
 - Dry run rendering: `helm template test ./charts/latest/azurelustre-csi-driver -n kube-system | less`
 - Force image pull always: `--set image.pullPolicy=Always`
 
-## latest chart configuration
+## Chart configuration
 
 > [!WARNING]
 > `image.tag` and `node.<flavor>.lustreClient.*` are exposed for debugging and
-> hotfixes only. Each release is validated with a specific driver image and
-> Lustre client version together, and overriding either on its own breaks that
-> pairing. Do not set them unless Microsoft support directs you to.
+> hotfixes only. Each chart release is validated with a specific driver image
+> family and Lustre client version together, and overriding either on its own
+> breaks that pairing. Do not set them unless Microsoft support directs you to.
 
 The chart manages the `csi-provisioner` arguments as part of the supported
 driver configuration. In particular, it preserves the complete PVC UID in
 dynamically provisioned volume names by setting
 `--volume-name-uuid-length=-1`.
 
-Key configurable parameters from `values.yaml` (latest snapshot) and defaults:
+Key configurable parameters and defaults from the version-neutral source
+`values.yaml`. The release pipeline replaces `image.tag` with the selected
+driver image family when it packages a chart:
 
 | Parameter | Description | Default |
 | --- | --- | --- |
 | `image.repository` | Driver image repository | `mcr.microsoft.com/oss/v2/kubernetes-csi/azurelustre-csi` |
-| `image.tag` | Driver image tag | `v0.5.0` (released) <br> `latest` (snapshot) |
+| `image.tag` | Driver image family base; OS-specific templates append a flavor suffix | `latest` |
 | `image.pullPolicy` | Driver image pull policy | `Always` |
 | `sidecars.provisioner.repository` | csi-provisioner sidecar image | `mcr.microsoft.com/oss/kubernetes-csi/csi-provisioner` |
 | `sidecars.provisioner.tag` | csi-provisioner image tag | `v5.2.0` |

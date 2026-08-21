@@ -32,6 +32,13 @@ The addition of native sidecar containers (init containers with `restartPolicy: 
 | v0.1.14 | mcr.microsoft.com/oss/kubernetes-csi/azurelustre-csi:v0.1.14 | 1.21+ | 2.15.3 |
 | v0.1.11 | mcr.microsoft.com/oss/kubernetes-csi/azurelustre-csi:v0.1.11 | 1.21+ | 2.15.1 |
 
+Helm chart versions are independent from the driver versions in this table. A
+chart uses a bare version such as `A.B.C`. Its `appVersion` reports `vX.Y.Z` as
+informational driver metadata, while `image.tag` selects the `vX.Y.Z` driver
+image family it deploys. The Helm README's
+[released-chart table](charts/README.md#released-chart-versions) records the
+mapping.
+
 &nbsp;
 
 ## Set up CSI driver on AKS cluster (only for AKS users)

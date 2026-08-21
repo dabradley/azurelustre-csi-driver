@@ -335,37 +335,38 @@ check_node_template_consistency() {
   return 0
 }
 
-check_version_label() {
-  # Verify version consistency within a chart:
-  #   1. Chart.yaml appVersion matches values.yaml image.tag
-  #   2. Rendered app.kubernetes.io/version labels match Chart.yaml appVersion
-  #   3. For versioned (non-latest) charts: appVersion matches DRIVER_VERSION from deploy yamls
+check_source_version_metadata() {
+  # Ev2 injects release metadata into a temporary copy before packaging.
+  # Keep the canonical source chart version-neutral.
   local version=${1}
   local chart_dir="./charts/${version}/azurelustre-csi-driver"
   local version_issues=false
 
+  local chart_version
+  chart_version=$(yq '.version' "${chart_dir}/Chart.yaml")
   local app_version
   app_version=$(yq '.appVersion' "${chart_dir}/Chart.yaml")
   local image_tag
   image_tag=$(yq '.image.tag' "${chart_dir}/values.yaml")
 
-  echo "== Checking version consistency for chart: ${version} =="
+  echo "== Checking source version metadata for chart: ${version} =="
+  echo "  Chart.yaml version: ${chart_version}"
   echo "  Chart.yaml appVersion: ${app_version}"
   echo "  values.yaml image.tag: ${image_tag}"
 
-  # Check that Chart.yaml appVersion matches values.yaml image.tag
-  if [[ "${app_version}" != "${image_tag}" ]]; then
-    echo "ERROR: Chart.yaml appVersion '${app_version}' does not match values.yaml image.tag '${image_tag}'"
+  if [[ "${chart_version}" != "0.0.0" ]]; then
+    echo "ERROR: Source Chart.yaml version must be '0.0.0', got '${chart_version}'"
     version_issues=true
   fi
 
-  # For versioned charts (not latest), check appVersion matches deploy yaml DRIVER_VERSION
-  if [[ "${version}" != "latest" ]]; then
-    echo "  Deploy yaml DRIVER_VERSION: ${DRIVER_VERSION}"
-    if [[ "${app_version}" != "${DRIVER_VERSION}" ]]; then
-      echo "ERROR: Chart.yaml appVersion '${app_version}' does not match deploy yaml image version '${DRIVER_VERSION}'"
-      version_issues=true
-    fi
+  if [[ "${app_version}" != "latest" ]]; then
+    echo "ERROR: Source Chart.yaml appVersion must be 'latest', got '${app_version}'"
+    version_issues=true
+  fi
+
+  if [[ "${image_tag}" != "latest" ]]; then
+    echo "ERROR: Source values.yaml image.tag must be 'latest', got '${image_tag}'"
+    version_issues=true
   fi
 
   # Check rendered app.kubernetes.io/version labels
@@ -401,7 +402,7 @@ check_version_label() {
     return 1
   fi
 
-  echo "Version consistency check passed: ${app_version}"
+  echo "Source chart metadata is version-neutral"
   echo
   return 0
 }
@@ -620,10 +621,55 @@ check_service_account_names() {
   echo "ServiceAccount names render correctly (fixed, not overridable)"
 }
 
+check_chart_source_layout() {
+  local layout_issues=false
+  local packaged_charts=()
+  local unexpected_dirs=()
+
+  echo "== Checking chart source layout =="
+
+  if [[ -e charts/index.yaml ]]; then
+    echo "ERROR: charts/index.yaml is not used for OCI distribution"
+    layout_issues=true
+  fi
+
+  mapfile -t packaged_charts < <(find charts -type f -name '*.tgz' -print)
+  if (( ${#packaged_charts[@]} > 0 )); then
+    echo "ERROR: Packaged charts must not be committed:"
+    printf '  %s\n' "${packaged_charts[@]}"
+    layout_issues=true
+  fi
+
+  mapfile -t unexpected_dirs < <(find charts -mindepth 1 -maxdepth 1 -type d ! -name latest -print)
+  if (( ${#unexpected_dirs[@]} > 0 )); then
+    echo "ERROR: Only charts/latest may contain chart source:"
+    printf '  %s\n' "${unexpected_dirs[@]}"
+    layout_issues=true
+  fi
+
+  if [[ ! -d charts/latest/azurelustre-csi-driver ]]; then
+    echo "ERROR: Canonical chart source is missing from charts/latest/azurelustre-csi-driver"
+    layout_issues=true
+  fi
+
+  if [[ "${layout_issues}" == true ]]; then
+    echo
+    return 1
+  fi
+
+  echo "Chart layout contains one unpackaged canonical source chart"
+  echo
+}
+
 echo "Verifying helm chart files against deploy yamls ..."
 
 issues_found=false
 failures=()
+
+if ! check_chart_source_layout; then
+  issues_found=true
+  failures+=("Chart source layout check")
+fi
 
 # Get expected image version from deploy files
 DRIVER_VERSION=$(grep -ohP "image:.*azurelustre-csi:\K[^-]*" deploy/*.yaml | sort -u)
@@ -639,19 +685,14 @@ if ! check_deploy_version_labels; then
   failures+=("Deploy yaml version label check")
 fi
 
-for version in charts/*/; do
-  version=$(basename "${version}")
-  echo
-  echo "=== Checking version: ${version} ==="
+version=latest
+echo
+echo "=== Checking version: ${version} ==="
 
-  if ! check_helm_lint "${version}"; then
-    issues_found=true
-    failures+=("Helm lint (version: ${version})")
-    # Skip further checks for this chart — if lint fails, downstream
-    # rendering/diff checks are unreliable.
-    continue
-  fi
-
+if ! check_helm_lint "${version}"; then
+  issues_found=true
+  failures+=("Helm lint (version: ${version})")
+else
   if ! check_unlisted_files "${version}"; then
     issues_found=true
     failures+=("Unlisted files check (version: ${version})")
@@ -667,9 +708,9 @@ for version in charts/*/; do
     failures+=("Node template consistency check (version: ${version})")
   fi
 
-  if ! check_version_label "${version}"; then
+  if ! check_source_version_metadata "${version}"; then
     issues_found=true
-    failures+=("Version label consistency check (version: ${version})")
+    failures+=("Source version metadata check (version: ${version})")
   fi
 
   if ! check_service_account_names "${version}"; then
@@ -686,7 +727,7 @@ for version in charts/*/; do
     issues_found=true
     failures+=("Workload identity configuration check (version: ${version})")
   fi
-done
+fi
 
 echo
 
