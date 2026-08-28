@@ -171,6 +171,7 @@ spec:
               name: socket-dir
             - mountPath: {{ .Values.paths.kubernetes }}/
               name: azure-cred
+              readOnly: true
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
       volumes:
