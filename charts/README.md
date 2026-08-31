@@ -110,7 +110,7 @@ driver image family when it packages a chart:
 | `node.tolerations` | Node DaemonSet tolerations. Tolerates common AKS user-pool taints (spot, GPU) but **not** `CriticalAddonsOnly`, so the plugin stays off reserved/tainted system pools. Overriding **replaces** this set — for custom-tainted Lustre pools, include the spot/GPU entries you still need. | spot + `sku=gpu` + `nvidia.com/gpu` |
 | `node.updateStrategy.maxUnavailable` | Max node pods unavailable during a rolling update | `10%` |
 | `node.jammy.lustreClient.version` | Lustre client version for jammy flavor | `2.15.8` |
-| `node.jammy.lustreClient.shaSuffix` | Lustre client SHA suffix for jammy flavor | `34-gc0f2040` |
+| `node.jammy.lustreClient.shaSuffix` | Lustre client SHA suffix for jammy flavor | `39-g2d32b59` |
 | `node.noble.lustreClient.version` | Lustre client version for noble flavor | `2.17.0` |
 | `node.noble.lustreClient.shaSuffix` | Lustre client SHA suffix for noble flavor | `24-gf517bc4` |
 | `node.azurelinux3.lustreClient.version` | Lustre client version for azurelinux3 flavor | `2.17.0` |

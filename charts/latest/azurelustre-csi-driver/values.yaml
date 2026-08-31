@@ -120,7 +120,7 @@ node:
         memory: 20Mi
     lustreClient:
       version: 2.15.8
-      shaSuffix: 34-gc0f2040
+      shaSuffix: 39-g2d32b59
   noble:
     affinityOsSkus:
       - Ubuntu2404
