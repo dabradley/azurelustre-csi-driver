@@ -17,8 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -76,4 +79,88 @@ func TestInitKlogFlags_InvalidThreshold(t *testing.T) {
 
 	// Assert
 	assert.Error(t, err, "expected error for invalid stderrthreshold value")
+}
+
+func TestRunPreDeleteCheck(t *testing.T) {
+	// Arrange
+	called := false
+	actualDriverName := ""
+	hasDeadline := false
+	check := func(ctx context.Context, driverName string) error {
+		called = true
+		actualDriverName = driverName
+		_, hasDeadline = ctx.Deadline()
+		return nil
+	}
+
+	// Act
+	err := runPreDeleteCheck(time.Second, "test.csi.example.com", check)
+
+	// Assert
+	require.NoError(t, err)
+	assert.True(t, called, "pre-delete check callback was not invoked")
+	assert.Equal(t, "test.csi.example.com", actualDriverName)
+	assert.True(t, hasDeadline, "pre-delete check context did not have a deadline")
+}
+
+func TestRunDispatchesPreDeleteCheck(t *testing.T) {
+	// Arrange
+	originalEnabled := *preDeleteCheck
+	originalTimeout := *preDeleteCheckTimeout
+	originalDriverName := *driverName
+	originalCheck := preDeleteCheckFunc
+	t.Cleanup(func() {
+		*preDeleteCheck = originalEnabled
+		*preDeleteCheckTimeout = originalTimeout
+		*driverName = originalDriverName
+		preDeleteCheckFunc = originalCheck
+	})
+
+	*preDeleteCheck = true
+	*preDeleteCheckTimeout = time.Second
+	*driverName = "test.csi.example.com"
+	called := false
+	preDeleteCheckFunc = func(context.Context, string) error {
+		called = true
+		return nil
+	}
+
+	// Act
+	err := run()
+
+	// Assert
+	require.NoError(t, err)
+	assert.True(t, called, "run did not dispatch the pre-delete check")
+}
+
+func TestRunPreDeleteCheckRejectsInvalidTimeout(t *testing.T) {
+	// Arrange
+	called := false
+	check := func(context.Context, string) error {
+		called = true
+		return nil
+	}
+
+	// Act
+	err := runPreDeleteCheck(0, "test.csi.example.com", check)
+
+	// Assert
+	require.EqualError(t, err, "pre-delete check timeout must be greater than zero")
+	assert.False(t, called, "pre-delete check callback ran with an invalid timeout")
+}
+
+func TestRunPreDeleteCheckReturnsCheckError(t *testing.T) {
+	// Arrange
+	expectedErr := errors.New("list failed")
+	check := func(context.Context, string) error {
+		return expectedErr
+	}
+
+	// Act
+	err := runPreDeleteCheck(time.Second, "test.csi.example.com", check)
+
+	// Assert
+	require.Error(t, err)
+	require.ErrorIs(t, err, expectedErr)
+	assert.EqualError(t, err, "pre-delete check failed: list failed")
 }

@@ -67,7 +67,34 @@ workloads and restart the node pods to complete the upgrade.
 
 ## Uninstall
 
+Stop new volume provisioning and delete every PersistentVolumeClaim and
+PersistentVolume backed by `azurelustre.csi.azure.com` before uninstalling. The
+default pre-delete guard lists existing PersistentVolumes and blocks removal of
+the Helm release while any still reference the driver. It also blocks removal
+when the Kubernetes API cannot be queried.
+
     helm uninstall azurelustre -n kube-system
+
+The guard only observes PersistentVolumes that already exist. It cannot detect
+a `CreateVolume` operation that has started creating an AMLFS filesystem but has
+not produced a PersistentVolume. Keep provisioning stopped throughout uninstall.
+
+To bypass the check, disable `preDeleteGuard.enabled` in the release values
+before uninstalling, or skip all Helm hooks:
+
+    helm uninstall azurelustre -n kube-system --no-hooks
+
+Bypassing can orphan a dynamically provisioned AMLFS filesystem or leave volume
+cleanup incomplete.
+
+> [!CAUTION]
+> The guard is not an Azure extension deletion guard. Azure deletes an AKS
+> cluster extension resource immediately and connected agents remove its Helm
+> release asynchronously. A failed hook can preserve the in-cluster release,
+> but it cannot preserve the Azure extension resource. Confirm that no matching
+> PersistentVolumes or provisioning operations remain before deleting an
+> extension instance. See [Delete extension
+> instance](https://learn.microsoft.com/azure/aks/deploy-extensions-az-cli#delete-extension-instance).
 
 ## Tips
 
@@ -119,6 +146,12 @@ driver image family when it packages a chart:
 | `rbac.create` | Create RBAC resources | `true` |
 | `csidriver.name` | CSIDriver name | `azurelustre.csi.azure.com` |
 | `csidriver.fsGroupPolicy` | FSGroupPolicy | `File` |
+| `preDeleteGuard.enabled` | Block Helm uninstall while matching PersistentVolumes exist or the check cannot complete | `true` |
+| `preDeleteGuard.imagePullPolicy` | Image pull policy for the hook Job | `IfNotPresent` |
+| `preDeleteGuard.checkTimeout` | Kubernetes API timeout for the guard process | `30s` |
+| `preDeleteGuard.priorityClassName` | Priority class for the hook Job | `system-cluster-critical` |
+| `preDeleteGuard.activeDeadlineSeconds` | Overall hook Job deadline | `300` |
+| `preDeleteGuard.ttlSecondsAfterFinished` | Retention period for a completed hook Job | `300` |
 | `IsWorkloadIdentityEnabled` | Enable controller workload identity | `Disabled` |
 | `IdentityClientId` | Workload identity client ID (required when enabled) | `""` |
 | `IdentityTenantId` | Optional cross-tenant workload identity tenant ID | `""` |
