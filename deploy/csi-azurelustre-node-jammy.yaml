@@ -121,7 +121,7 @@ spec:
             - name: LUSTRE_VERSION
               value: "2.15.8"
             - name: CLIENT_SHA_SUFFIX
-              value: "34-gc0f2040"
+              value: "39-g2d32b59"
           volumeMounts:
             - mountPath: /dev
               name: host-dev
@@ -255,7 +255,7 @@ spec:
             - name: LUSTRE_VERSION
               value: "2.15.8"
             - name: CLIENT_SHA_SUFFIX
-              value: "34-gc0f2040"
+              value: "39-g2d32b59"
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
